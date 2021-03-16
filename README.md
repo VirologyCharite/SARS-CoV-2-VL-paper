@@ -2,7 +2,8 @@
 
 This repository currently holds one file:
 
-* [additional statistical analysis](preprint.html) ([open in browser](http://htmlpreview.github.io/?https://github.com/VirologyCharite/SARS-CoV-2-VL-paper/blob/main/preprint.html))
+* [additional statistical analysis](preprint.html)
+([view in browser](http://htmlpreview.github.io/?https://github.com/VirologyCharite/SARS-CoV-2-VL-paper/blob/main/preprint.html)).
 
 to accompany our SARS-CoV-2 viral load preprint.
 
