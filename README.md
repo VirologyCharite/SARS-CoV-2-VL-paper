@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/348435588.svg)](https://zenodo.org/badge/latestdoi/348435588)
+
 ## Charite Institute of Virology March 2021 SARS-CoV-2 viral load paper
 
 This repository currently holds one file:
