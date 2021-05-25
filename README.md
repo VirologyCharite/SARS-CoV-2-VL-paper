@@ -98,23 +98,25 @@ As in Table S1 in the paper, test centre category abbreviations are as follows:
     SM: Sports medicine
     WD: Ward
 
-## Culture_probability_data_B.1.1.7.xlsx
+## Culture_probability_data_B.1.1.7.csv
 
-An Excel spreadsheet with data from the cell culturing trials. The three
-columns should be self-explanatory.
+A [CSV](https://en.wikipedia.org/wiki/Comma-separated_values) with data
+from the cell culturing trials. The three columns should be
+self-explanatory.
 
-## Culture_probability_data_wild_type.xlsx
+## Culture_probability_data_wild_type.csv
 
-An Excel spreadsheet with culture isolation data from the Ranawaka et
-al. paper
+A [CSV](https://en.wikipedia.org/wiki/Comma-separated_values) file with
+culture isolation data from the Ranawaka et al. paper
 [SARS-CoV-2 Virus Culture and Subgenomic RNA for Respiratory Specimens from Patients with Mild Coronavirus Disease](https://wwwnc.cdc.gov/eid/article/26/11/20-3219_article)
 and the van Kampen et al. paper
-[Duration and key determinants of infectious virus shedding in hospitalized patients with coronavirus disease-2019 (COVID-19)](https://www.nature.com/articles/s41467-020-20568-4). Columns should be self-explanatory.
+[Duration and key determinants of infectious virus shedding in hospitalized patients with coronavirus disease-2019 (COVID-19)](https://www.nature.com/articles/s41467-020-20568-4). Columns
+should be self-explanatory.
 
-## Culture_probability_data_wild_type_woelfel.xlsx
+## Culture_probability_data_wild_type_woelfel.csv
 
-An Excel spreadsheet with culture isolation data from the Wölfel et
-al. paper
+A [CSV](https://en.wikipedia.org/wiki/Comma-separated_values) file with
+culture isolation data from the Wölfel et al. paper
 [Virological assessment of hospitalized patients with COVID-2019](https://www.nature.com/articles/s41586-020-2196-x).
 Columns should be self-explanatory.
 

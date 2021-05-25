@@ -91,6 +91,7 @@ The analysis uses following data files:
 -   `min-3-timeseries.json` has time course data of subjects with at least 3 test results
 -   `Culture_probability_data_B.1.1.7.xlsx` has data from the culturing experiment conducted for the B.1.1.7 and B.1.177 types.
 
+
 ## RT-PCR test data
 
 In this data analysis, subjects are classified into one of the following groups:
@@ -100,6 +101,7 @@ In this data analysis, subjects are classified into one of the following groups:
 - Other: All subjects that do not fall into one of the first two groups.
 
 ```{r load1stPosData}
+## get_full_data() loads and pre-processes the data. 
 dt = get_full_data() %>%
   .[log10Load < 0, log10Load := NA] 
 ```
@@ -200,6 +202,7 @@ The following table and figures provide an overview over the data used in the an
 ```{r loadData}
 my_breaks = c(seq(0,25,5),seq(35,65,10),120)
 my_labels = c("0-5","5-10","10-15","15-20","20-25","25-35","35-45","45-55","55-65",">65")
+## get_TC_data() loads and pre-processes the data. 
 TC_data = get_TC_data()
 time_course_table =  
   TC_data %>%
@@ -265,6 +268,7 @@ rm(time_course_table)
 ```
 
 ```{r agesByMonth, fig.cap = "Number of ositive tests over time."}
+## get_log10Load_data() loads and pre-processes the data.
 bdata = 
   get_log10Load_data() 
 
@@ -594,6 +598,7 @@ B117data[, .(log10Load = mean(log10Load),
 Table \@ref(tab:B117CulturingData) gives an overview of the cell culturing data shown in figure  \@ref(fig:pB117CulturingPlot). 
 
 ```{r B117CulturingData }
+# get_CP_data() loads and pre-processes the data. 
 CP = 
   get_CP_data() %>% 
   .[Study == "Own data" & culture_positive == 1]

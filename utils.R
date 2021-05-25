@@ -3,7 +3,6 @@ library(boot)
 library(data.table)
 library(cmdstanr)
 library(rjson)
-library(readxl)
 library(ggplot2)
 library(magrittr)
 library(posterior)
@@ -160,7 +159,7 @@ get_log10Load_data = function() {
 #' @return a data.table 
 get_CP_data = function() {
   dt = 
-    read_excel(here("data/2020-08-19_merged_extracted_data.xlsx")) %>%
+    fread(here("data/Culture_probability_data_wild_type.csv")) %>%
     data.table() %>%
     setnames(c("day_from_symptom_onset_raw",   # renaming variables
                "cycle_threshold_extracted",
@@ -172,8 +171,7 @@ get_CP_data = function() {
                "Study"))
   
   W.dt = 
-    fread(here("data/2020-08-27_woelfel_isolation_data.csv")) %>%
-      .[, log10_viral_load := as.numeric(gsub(",",".",log10_viral_load, perl = T))] %>%
+    fread(here("data/Culture_probability_data_wild_type_woelfel.csv")) %>%
       .[, Study := "woelfel"] %>%
       .[, Ct := NA] %>%
       setnames(c("log10_viral_load","days_since_symptom","patient"),
@@ -183,8 +181,7 @@ get_CP_data = function() {
   setkeyv(W.dt,c("ID","sample_type","day_from_onset"))
   
   V.dt = 
-    read_excel(here("data/B1.1.7Iso_trial_VMC20042021_Berlin_new.xlsx")) %>% 
-    data.table() %>% 
+    fread(here("data/Culture_probability_data_B.1.1.7.csv")) %>% 
     .[, culture_outcome := ifelse(culture == 1, "positive","negative")] %>% 
     .[, culture_positive := culture] %>% 
     .[, Study := "Own data"] %>% 
