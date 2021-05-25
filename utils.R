@@ -161,24 +161,18 @@ get_CP_data = function() {
   dt = 
     fread(here("data/Culture_probability_data_wild_type.csv")) %>%
     data.table() %>%
-    setnames(c("day_from_symptom_onset_raw",   # renaming variables
-               "cycle_threshold_extracted",
-               "log10_viral_load_extracted",
+    setnames(c("log10_viral_load_extracted",# renaming variables
                "original_study"),
-             c("day_from_onset",
-               "Ct",
-               "log10Load",
+             c("log10Load",
                "Study"))
   
   W.dt = 
     fread(here("data/Culture_probability_data_wild_type_woelfel.csv")) %>%
       .[, Study := "woelfel"] %>%
-      .[, Ct := NA] %>%
-      setnames(c("log10_viral_load","days_since_symptom","patient"),
-               c("log10Load","day_from_onset","ID")) %>%
-    .[, Ct := log10Load * -3.962 + 49.678]
+      setnames(c("log10_viral_load","patient"),
+               c("log10Load","ID")) 
   
-  setkeyv(W.dt,c("ID","sample_type","day_from_onset"))
+  setkeyv(W.dt,c("ID","sample_type"))
   
   V.dt = 
     fread(here("data/Culture_probability_data_B.1.1.7.csv")) %>% 
