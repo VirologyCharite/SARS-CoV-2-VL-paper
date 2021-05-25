@@ -100,7 +100,7 @@ As in Table S1 in the paper, test centre category abbreviations are as follows:
 
 ## Culture_probability_data_B.1.1.7.csv
 
-A [CSV](https://en.wikipedia.org/wiki/Comma-separated_values) with data
+A [CSV](https://en.wikipedia.org/wiki/Comma-separated_values) file with data
 from the cell culturing trials. The three columns should be
 self-explanatory.
 
