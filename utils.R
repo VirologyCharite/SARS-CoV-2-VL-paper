@@ -9,16 +9,17 @@ library(magrittr)
 library(posterior)
 library(bayesplot)
 library(splines)
+library(parallel)
+library(EnvStats)
 options(mc.cores = 4)
 
-set_cmdstan_path(
-  ifelse(Sys.info()["sysname"] == "Darwin",
-         "/Users/guidobiele/.cmdstanr/cmdstan-2.26.1",
-         "/home/ubuntu/cmdstan-2.26.1/"))
+fn_fulldt = here("data/fulldt.Rdata")
+if (!file.exists(fn_fulldt)) {
+  fulldt =
+    fread(here("data/viral-load-with-negatives.tsv.bz2"))
+  save(fulldt,file = fn_fulldt)
+}
 
-# fulldt =
-#     fread(here("data/categories-and-load-with-negatives.tsv.bz2"))
-#  save(fulldt,file = here("data/fulldt.Rdata"))
 
 #' Identify centre with longest duration between consecutive tests from the same centre
 #' 
@@ -89,11 +90,14 @@ get_full_data = function() {
     .[Age <= 0, Age := 0.1] %>%
     .[, AgeGroup := cut(Age,breaks = AG_breaks,ordered = T, labels = AG_labels)] %>%
     .[, Date := as.Date(Date,format = "%Y-%m-%d")] %>%
+    .[, Onset.Date := as.Date(Onset,format = "%Y-%m-%d")] %>% 
+    .[, keep_Onset := ifelse(is.na(Onset.Date),F,T)] %>% 
+    .[is.na(Onset.Date), Onset.Date := as.Date(Onset,format = "%Y-%m-%d")] %>% 
+    .[, Onset := as.numeric(Date - Onset.Date)] %>%
     .[, month := month(Date)] %>%
     .[, day := 1+as.numeric(Date - min(Date))] %>%
     .[, PCR := gsub("T2","cobas",PCR)] %>%
     .[, PCR := factor(PCR)] %>%
-    setnames("PCR1-TestCentreCategory","TestCentreCategory") %>%
     .[, PCR := factor(PCR)] %>%
     .[ TestCentreCategory == "C19" & Hospitalized == 0, PAMS1 := 1] %>% 
     .[ , Hospital_centre := ifelse(TestCentreCategory %in% HOSPITAL_TEST_CENTRE,1,0)] %>% 
@@ -104,31 +108,32 @@ get_full_data = function() {
                               labels = my_labels)] %>% 
     setkeyv(c("Age","personHash"))
   
-  AgeGrpLvls = fulldt[, list(paste(floor(range(Age)), collapse = "-")), by = "AgeGroup"]$V1
+  AgeGrpLvls = fulldt[, list(paste(ceiling(range(Age)), collapse = "-")), by = "AgeGroup"]$V1
   fulldt %>% 
     .[, Month := ordered(months(Date),
                          levels = unique(months(sort(fulldt$Date))))]
   
   fulldt %>% 
     .[, nAge := Age + rnorm(1, sd = .5), by = 1:nrow(fulldt)] %>% 
-    .[, B117centre := ifelse(TestCentreFull %in% unique(fulldt[B117 == 1, TestCentreFull]),T,F)] %>% 
+    .[, B117centre := ifelse(TestCentre %in% unique(fulldt[B117 == 1, TestCentre]),T,F)] %>% 
     .[, cWeek := week(Date)] %>% 
-    .[, CentreWeek := paste0(TestCentreFull,cWeek)]
+    .[, CentreWeek := paste0(TestCentre,cWeek)]
   
   return(fulldt)
 }
 
-#' Load an preprocess first positive test data
+#' Load and pre-process first-positive test data.
 #' 
 #' @return a data.table 
 get_log10Load_data = function() {
   bdata = 
     get_full_data() %>% 
-    .[log10Load > 0]
+    .[log10Load > 0] %>% 
+    .[, AgeGroup2 := cut(Age,breaks = c(0,5,10,15,20,65,101))]
   
   
   B117CentreDay = 
-    unique(bdata[B117 == 1, .(TestCentreFull,Date)])
+    unique(bdata[B117 == 1, .(TestCentre,Date)])
   
   bdata %>% 
     .[, B117CentreDay0 := F] %>% 
@@ -139,7 +144,7 @@ get_log10Load_data = function() {
     .[, B117CentreDay5 := F]
   for (k in 1:nrow(B117CentreDay)) {
     for (d in 0:5) {
-      bdata[TestCentreFull == B117CentreDay$TestCentreFull[k] & 
+      bdata[TestCentre == B117CentreDay$TestCentre[k] & 
               abs(as.numeric(Date-B117CentreDay$Date[k])) <= d,
             (paste0("B117CentreDay",d)) := T]
     }
@@ -150,7 +155,7 @@ get_log10Load_data = function() {
   return(bdata)
 }
 
-#' Load an preprocess culture positivity data
+#' Load and pre-process culture positivity data.
 #' 
 #' @return a data.table 
 get_CP_data = function() {
@@ -166,92 +171,105 @@ get_CP_data = function() {
                "log10Load",
                "Study"))
   
-  wdt = rbind(
+  W.dt = 
     fread(here("data/2020-08-27_woelfel_isolation_data.csv")) %>%
       .[, log10_viral_load := as.numeric(gsub(",",".",log10_viral_load, perl = T))] %>%
       .[, Study := "woelfel"] %>%
       .[, Ct := NA] %>%
       setnames(c("log10_viral_load","days_since_symptom","patient"),
-               c("log10Load","day_from_onset","ID"))
-    ,
-    fread(here("data/2020-08-20_woelfel_swab_sputum_dirty_wide.csv")) %>%
-      melt(id.var = "days_since_symtpom", value.name = "log10Load") %>%
-      .[, variable := as.character(variable)] %>%
-      .[!is.na(log10Load)] %>%
-      .[, ID := strsplit(variable, "_")[[1]][1],
-        by = c("days_since_symtpom","variable","log10Load")] %>%
-      .[, sample_type := ifelse(grepl("swap",variable),"swab","sputum")] %>%
-      .[, variable := NULL] %>%
-      .[, Study := "woelfel"] %>% 
-      .[, culture_outcome := NA] %>%
-      setnames(c("days_since_symtpom"),
-               c("day_from_onset"))
-    , fill = T) %>%
+               c("log10Load","day_from_onset","ID")) %>%
     .[, Ct := log10Load * -3.962 + 49.678]
   
-  setkeyv(wdt,c("ID","sample_type","day_from_onset"))
+  setkeyv(W.dt,c("ID","sample_type","day_from_onset"))
   
+  V.dt = 
+    read_excel(here("data/B1.1.7Iso_trial_VMC20042021_Berlin_new.xlsx")) %>% 
+    data.table() %>% 
+    .[, culture_outcome := ifelse(culture == 1, "positive","negative")] %>% 
+    .[, culture_positive := culture] %>% 
+    .[, Study := "Own data"] %>% 
+    .[, sample_type := "swab"] %>% 
+    .[, Clade := factor(Clade, levels = c("B.1.177","B.1.1.7"))] %>% 
+    .[!is.na(Clade)]
+  V.dt[, ID := 1:nrow(V.dt)]
   
   dt = 
-    rbind(dt[,intersect(names(dt),names(wdt)), with = F],
-          wdt[,intersect(names(dt),names(wdt)), with = F]) %>%
+    rbind(dt,
+          W.dt,
+          V.dt,
+          fill = T) %>%
     .[culture_outcome == "no_culture", culture_positive := NA] %>%
-    .[, culture_positive := ifelse(culture_outcome == "positive",1L,0L)] 
-  
-  ber_dt = fromJSON(file = here("data/sa-min-3.json"))
-  ber_dt = do.call(rbind,lapply(ber_dt$people,
-                                function(x)
-                                  as.data.table(x))) %>%
+    .[, culture_positive := ifelse(culture_outcome == "positive",1L,0L)] %>%
+    .[!is.na(log10Load)] %>% 
+    .[Study == "van_kampen", Study := "van Kampen (2021)"] %>% 
+    .[Study == "ranawaka", Study := "Perera (2021)"] %>% 
+    .[Study == "woelfel", Study := "Woelfel (2020)"] %>% 
+    .[, Study := factor(Study)] %>% 
+    .[, .(ID,log10Load,culture_positive,Study,sample_type,Clade)]
+  return(dt)
+}
+
+#' Load and pre-process time course data.
+#' 
+#' @return a data.table 
+get_TC_data = function() {
+  js2data.table = function(x) {
+    if (is.null(x$onset))
+      x$onset = NA
+    dt = as.data.table(x)
+  }
+  TC.dt = fromJSON(file = here("data/min-3-timeseries.json"))
+  TC.dt = do.call(rbind,lapply(TC.dt$people,
+                                function(x) 
+                                  js2data.table(x))) %>%
     .[, ID := factor(personHash)] %>%
     .[, ID := factor(as.numeric(ID))] %>%
-    .[, c("firstName","familyName") := NULL] %>%
-    .[, PCRdate := as.Date(PCRdate, format = "%m/%d/%Y")]  %>%
+    .[, PCRdate := as.Date(date, format = "%Y-%m-%d")]  %>%
+    .[, date := NULL] %>% 
+    .[, onset_json := as.Date(onset, format = "%Y-%m-%d")]  %>%
+    .[, onset := NULL] %>% 
     .[, day := as.numeric(PCRdate)] %>% 
-    .[, DOB := as.Date(DOB, format = "%m/%d/%Y")]  %>%
-    .[, Age := as.numeric((PCRdate-DOB))/365] %>%
+    .[, Age := age] %>%
     .[, Age := min(Age), by = "ID"] %>%
     setnames("viralLoad", "log10Load") %>%
     .[, N_tests := .N, by = ID] %>%
-    .[, Study := "BER"]
-
-  for (id in unique(ber_dt$ID)) 
-    ber_dt[ID == id, day := day - min(ber_dt[ID == id,day])]
-
-  load(here("data/fulldt.Rdata"))
-  setkeyv(fulldt,"personHash")
-  setkeyv(ber_dt,"personHash")
-  ber_dt[fulldt, `:=`(B117 = B117, Gender = Gender, PAMS1 = PAMS1, Hospitalized = Hospitalized)]
+    .[, Study := "BER"] %>% 
+    .[, day := as.numeric(PCRdate - min(PCRdate)), by = .(ID)]
   
-  merged_data =
-    rbind(dt,ber_dt, fill= T) %>%
-    .[!is.na(log10Load)] %>%
-    .[, Study := factor(Study)] %>%
-    .[, StudyID := as.numeric(Study)] %>% 
-    .[, N_tests := .N, by = "ID"] %>%
-    .[, N_test_grp := cut(N_tests,breaks = c(0,2.5,3,4,5,6,7,9,15,100), ordered_result = T)] %>%
-    .[, N_test_grp := cut(N_tests,breaks = c(0,5,15,100), ordered_result = T)] %>%
-    .[,c("ID","day_from_onset", "Study", "log10Load", "culture_positive","N_test_grp","N_tests","Age","day","testName",
-         "centreCategory","Gender","Hospitalized","PCRdate","personHash","B117")] 
-  return(merged_data)
+  
+  fulldt = get_full_data()
+  setkeyv(fulldt,"personHash")
+  setkeyv(TC.dt,"personHash")
+  TC.dt %>% 
+    .[fulldt, `:=`(B117 = B117,
+                   Gender = Gender,
+                   PAMS1 = PAMS1,
+                   Hospitalized = Hospitalized,
+                   symptom_onset = Onset.Date,
+                   keep_Onset = keep_Onset)]
+  
+  TC.dt %>% 
+  .[,onset_day := as.numeric(onset_json-min(PCRdate)), by = .(ID)] #%>% 
+  #.[onset_day < -14, onset_day := NA]
+  
+  TC.dt =
+    TC.dt %>%
+    .[, N_test_grp := cut(N_tests,breaks = c(0,5,15,100), ordered_result = T)]
+  return(TC.dt)
 }
 
-#' Preprocess data for viral load time course analysis
+
+#' Pre-process data for viral load time course analysis.
 #' 
 #' @return a data.table 
 prep_time_course_data = function(merged_data, latest_peak_day = Inf) {
-  PAMS1_personHash = get_log10Load_data()[PAMS1 == 1,personHash]
-  ## cleaning options
-  # 1. remove time courses with peak load after day 15
-  
   tmp = 
     merged_data %>%
-    .[,PAMS1 := 0] %>%
-    .[personHash %in% PAMS1_personHash, PAMS1 := 1] %>%
     .[, Gender := as.numeric(factor(Gender,levels = c("F","M")))-1] %>% 
     .[Study == "BER"] %>%
     .[, N_tests := .N, by = ID] %>%
     .[ N_tests >= 3] %>%
-    setkeyv(unique(c(grp_var,"ID","day_from_onset"))) %>%
+    setkeyv(unique(c(grp_var,"ID"))) %>%
     .[, max_day := max(day), by = "ID"] %>%
     .[, max_load := max(log10Load), by = "ID"] %>%
     .[, max_load_day := max((log10Load == max_load)*day), by = .(ID)] %>% 
@@ -260,13 +278,13 @@ prep_time_course_data = function(merged_data, latest_peak_day = Inf) {
     .[log10Load > 2, day_first_positive := min(day), by = ID] %>%
     .[, day_first_positive := max(day_first_positive,na.rm = T), by = ID] %>%
     .[, days := max_day - min(day_first_positive, na.rm = T), by = "ID"] %>%
-    .[, hospitalized := sum(centreCategory %in% HOSPITAL_TEST_CENTRE) > 0, by = "ID"] %>%
-    .[, phosptests := mean(centreCategory %in% HOSPITAL_TEST_CENTRE), by = "ID"] %>%
+    .[, hospitalized := sum(testCentreCategory %in% HOSPITAL_TEST_CENTRE) > 0, by = "ID"] %>%
+    .[, phosptests := mean(testCentreCategory %in% HOSPITAL_TEST_CENTRE), by = "ID"] %>%
     .[, NtestsCat := cut(N_tests, breaks = c(2:9,20))] %>%
     .[, last_test_negative := ifelse(tail(log10Load,1) <= 2 ,T,F), by = "ID"] %>%
     .[, first_test_negative := ifelse(head(log10Load,1) <= 2 ,T,F), by = "ID"] %>%
     .[, first_last_test_negative := ifelse(last_test_negative == T & first_test_negative == T,T,F), by = "ID"] %>% 
-    .[, ld_centre := get_ld_centre(centreCategory,day), by = "ID"] %>% 
+    .[, ld_centre := get_ld_centre(testCentreCategory,day), by = "ID"] %>% 
     .[, diff_load_12 := diff(log10Load)[1], by = .(ID)] %>% 
     .[, diff_day_12 := diff(day)[1], by = .(ID)] %>% 
     .[, diff_load_12perday := diff_load_12/diff_day_12, by = .(ID)] %>% 
@@ -287,7 +305,7 @@ prep_time_course_data = function(merged_data, latest_peak_day = Inf) {
 #' Generate list with data for Stan model for time course analysis
 #' 
 #' @param selection minimum number of tests per subject
-#' @param samples reduced number of subjects chose (for testing)
+#' @param samples reduced number of subjects chosen (for testing)
 #' @param max_diff_load_12perday maximum initial raw slope allowed. Will deselect participants with a higher slope
 #' @param ub_log_slope_up_mu upper bound for the Stan model parameter log_slope_up_mu
 #' @return a list
@@ -296,10 +314,14 @@ make_time_course_standata = function(selection = 3,
                                      max_diff_load_12perday = NULL,
                                      ub_log_slope_up_mu = Inf,
                                      imputation_limit = 3,
-                                     latest_peak_day = Inf) {
-  merged_data = get_CP_data()
+                                     latest_peak_day = Inf,
+                                     remove_some_onsets = T) {
+  TC_data = get_TC_data()
   day_data = 
-    prep_time_course_data(merged_data, latest_peak_day = latest_peak_day)
+    prep_time_course_data(TC_data, latest_peak_day = latest_peak_day)
+  if (remove_some_onsets == T)
+    day_data[keep_Onset == F, onset_day := NA]
+    
   
   
   if (!is.null(max_diff_load_12perday)) {
@@ -329,9 +351,10 @@ make_time_course_standata = function(selection = 3,
     .[, ld_centre := factor(ld_centre, levels = ld_centre_lvls)]
   
   
-  centre_matrix = model.matrix(~ 0 + centreCategory, day_data[day == 0])
+  centre_matrix = model.matrix(~ 0 + testCentreCategory, day_data[day == 0])
   Gender = day_data[day == 0, Gender]
-  X_PGH = model.matrix(~ 1 + PAMS1 + Gender + Hospitalized + B117 + PAMS1:Hospitalized + B117:PAMS1, day_data[day == 0][, Gender := ifelse(is.na(Gender),0.5,Gender)])
+  X_PGH_data = day_data[day == 0][, Gender := ifelse(is.na(Gender),0.5,Gender)][, Age := scale(Age)][,B117 := as.numeric(B117)][, PAMS1 := as.numeric(PAMS1)]
+  X_PGH = model.matrix(~ 1 + PAMS1 + Gender + Hospitalized + B117 + PAMS1:Hospitalized + B117:PAMS1 + B117:Age, X_PGH_data)
   X_PGH = X_PGH[,-1]
   X_PGH = X_PGH[,colSums(X_PGH)>0]
   B_Age = t(bs(day_data[day == 0, Age],
@@ -346,7 +369,6 @@ make_time_course_standata = function(selection = 3,
                                        names = F)))
   X_ld_centre = model.matrix(~ ld_centre, day_data[day == 0])[,-1]
 
-  FTN = 
   datalist_DAY = list(
     N_DAY = nrow(day_data),
     gstart_DAY = c(1,which(diff(as.numeric(day_data[, get(grp_var)])) != 0)+1),
@@ -354,6 +376,9 @@ make_time_course_standata = function(selection = 3,
     G = length(unique(day_data[,get(grp_var)])),
     Y_DAY = day_data$log10Load,
     X_DAY = day_data$day,
+    N_onset = length(which(!is.na(day_data[day == 0, onset_day]))),
+    idx_onset = which(!is.na(day_data[day == 0, onset_day])),
+    onset = day_data[day == 0 & !is.na(onset_day), onset_day],
     N_T1_neg = sum(day_data[day == 0,first_test_negative] == T),
     T1_neg_idx = which(day_data[day == 0,first_test_negative] == T),
     N_T1_pos = sum(day_data[day == 0,first_test_negative] == F),
@@ -362,11 +387,11 @@ make_time_course_standata = function(selection = 3,
     N_NegTests = sum(day_data$log10Load == 0),
     idx_NegTests = which(day_data$log10Load == 0),
     PCR = 1*(day_data$testName == "T2"),
-    N_centres = length(unique(day_data$centreCategory)),
-    centre = model.matrix(~ 0 + centreCategory, day_data),
+    N_centres = length(unique(day_data$testCentreCategory)),
+    centre = model.matrix(~ 0 + testCentreCategory, day_data),
     Gender = do.call(c,lapply(Gender, function(x) ifelse(is.na(x),0.5,1*(x == "M")))),
-    N_centre1 = length(unique(day_data[day == 0, centreCategory])),
-    centre1 = as.numeric(factor(day_data[day == 0, centreCategory])),
+    N_centre1 = length(unique(day_data[day == 0, testCentreCategory])),
+    centre1 = as.numeric(factor(day_data[day == 0, testCentreCategory])),
     N_ld_centre = length(unique(day_data[day == 0, ld_centre])),
     ld_centre = as.numeric(factor(day_data[day == 0, ld_centre])),
     K_ld_centre = ncol(X_ld_centre),
@@ -387,7 +412,8 @@ make_time_course_standata = function(selection = 3,
   
   #### CP data ###
   cp_data = 
-    merged_data[!is.na(culture_positive) & Study %in% c("woelfel","ranawaka") & log10Load > 2] 
+    get_CP_data() %>% 
+    .[!is.na(culture_positive) & Study %in% c("woelfel","ranawaka") & log10Load > 2] 
   
   datalist_CP = list(
     N_CP = nrow(cp_data),
@@ -402,10 +428,12 @@ make_time_course_standata = function(selection = 3,
   return(list(datalist = datalist, day_data = day_data))
 } 
 
+
 make_age_group_N = function(bdata,breaks = NULL,my_group = NULL) {
   complete_age_table = 
     bdata[,.(Age)] %>% 
-    .[, Age := floor(Age)] %>%
+    .[, Age := ceiling(Age)] %>%
+    .[Age == 101, Age := 100] %>% 
     .[, age_group := cut(Age, breaks = breaks, right = F)] %>% 
     unique()
   
@@ -415,7 +443,7 @@ make_age_group_N = function(bdata,breaks = NULL,my_group = NULL) {
   
   age_group_N =
     tmpdata %>%
-    .[, Age := floor(Age)] %>%
+    .[, Age := ceiling(Age)] %>%
     .[, age_group := cut(Age, breaks = breaks, right = F)] %>%
     .[, .(N_Age = sum(.N)), by = .(age_group,Age)] 
   
@@ -427,7 +455,117 @@ make_age_group_N = function(bdata,breaks = NULL,my_group = NULL) {
   return(age_group_N)
 }
 
+#' Estimate probability of hospitalization, male, or starting out as PAMS given Age for participants with time course data.
+#' Results are written to data.table with 
+#' @value NULL
+est_TC_PHG_by_Age = function() {
+  make_time_course_standata(selection = 3,
+                            max_diff_load_12perday = 5,
+                            ub_log_slope_up_mu = Inf,
+                            imputation_limit = 3) %>% 
+    list2env(.GlobalEnv)
+  
+  my_data = data.table(
+    Age = datalist$Age,
+    PAMS1 = datalist$X_PGH[,"PAMS1TRUE"],
+    Gender = datalist$X_PGH[,"Gender"],
+    Hospitalized = datalist$X_PGH[,"Hospitalized"]
+  ) 
+  my_data[,ID := 1:nrow(my_data)]
+   
+  
+  fit = 
+    brm(Hospitalized ~ s(Age), 
+        family = bernoulli, 
+        data = my_data, 
+        backend = "cmdstanr")
+  pp_hosp = posterior_epred(fit)
+  
+  
+  fit = 
+    brm(PAMS1 ~ s(Age), 
+        family = bernoulli, 
+        data = my_data, 
+        backend = "cmdstanr")
+  pp_PAMS1 = posterior_epred(fit)
+  
+  
+  fit = 
+    brm(Gender ~ s(Age), 
+        family = bernoulli, 
+        data = my_data[Gender != .5], 
+        backend = "cmdstanr")
+  pp_Gender = posterior_epred(fit,newdata = my_data)
+  
+  
+  u.format = function(pp,var) {
+    return(
+      pp %>% 
+        t() %>% 
+        data.table() %>% 
+        .[, ID := my_data$ID] %>% 
+        melt(id.vars = "ID", value.name = var) %>% 
+        .[, .draw := as.numeric(gsub("V","",variable))] %>% 
+        .[, variable := NULL] %>% 
+        setkeyv(c("ID",".draw"))
+    )
+  }
+  
+  TC_PHG_by_Age = 
+    u.format(pp_hosp,"Hospitalized") %>% 
+    .[u.format(pp_PAMS1,"PAMS1"),PAMS1 := PAMS1] %>% 
+    .[u.format(pp_Gender,"Gender"),Gender := Gender] 
+  
+  
+  save(TC_PHG_by_Age,file = "TC_PHG_by_Age.Rdata")  
+}
+
+
 #### Manipulate draws and calculate statistics ####
+
+#' Calculate highest density interval for beta-distributed variable
+#' 
+#' Uses following steps: 
+#' 1. Estimates parameters of beta distribution
+#' 2. Calculates HDI for density of parameterized beta distribution
+#' 
+#' Dependencies: fitdistrplus, hdrcde
+#' @param data vector with (approximately) beta distributed variable
+#' @param x vector of values x at which beta distribution is evaluated
+#' @return 
+fast.hdi = function(my_data, probs = seq(50,95,5), posterior.dist = "beta") {
+  
+  if (posterior.dist == "beta") {
+    x = seq(max(1e-4,min(my_data)),min(max(my_data),1-1e-4),length = 5000)
+    # d.pars = fitdistrplus::fitdist(my_data,posterior.dist)
+    # y = dbeta(x,d.pars$estimate[1],d.pars$estimate[2])
+    d.pars = EnvStats::ebeta(my_data)
+    y = dbeta(x,d.pars$parameters[1],d.pars$parameters[2])
+    hdi = hdrcde::hdr(den = list(x = x,
+                                 y = y),
+                      prob = probs)$hdr
+  } else if (posterior.dist == "norm") {
+    x = seq(min(my_data),max(my_data),length = 1000)
+    hdi = hdrcde::hdr(den = list(x = x,
+                                 y = dnorm(x,mean(my_data),
+                                           sd(my_data))),
+                      prob = probs)$hdr
+  }
+  
+  hdi[is.na(hdi)] = 0
+  hdis = matrix(hdi[,1:2],nrow = 1)
+  if (ncol(hdi) == 4) {
+    hdis = rbind(
+      hdis, as.vector(hdi[,3:4]))
+  }
+  
+  colnames(hdis) = c(paste0("lower",rev(probs)),paste0("upper",rev(probs)))
+  hdis = data.table(hdis)
+  hdis = cbind(data.table(mean = rep(mean(my_data),(ncol(hdi)/2))),
+               hdis, hdi.group = 1:(ncol(hdi)/2)) 
+  return(hdis)
+} 
+
 
 #' Generate a draws data.table
 #' 
@@ -456,7 +594,7 @@ post_stats_list = function(x) {
 #' Generate list with mean and a larger number of quantiles. Mainly for use in data.tables
 #' 
 #' @param x a vector with real numbers.
-#' @param quantiles a vector with quantiles to be calculates (default : seq(.5,.95,by = .05))
+#' @param quantiles a vector with quantiles to be calculated (default : seq(.5,.95,by = .05))
 #' @return a list
 my_stats_list_long = function(x, quantiles = seq(.5,.90,by = .05)) {
   m = collapse::fmean(x)
@@ -471,7 +609,7 @@ my_stats_list_long = function(x, quantiles = seq(.5,.90,by = .05)) {
 #' @param dt a long-form data.table with posterior samples and auxiliary variables
 #' @param var variable in data.frame for which statistics are calculated
 #' @param by grouping variable in data.frame
-#' @param quantiles a vector with quantiles to be calculates (default : seq(.5,.95,by = .05))
+#' @param quantiles a vector with quantiles to be calculated (default : seq(.5,.95,by = .05))
 #' @return a data.table
 get_stats = function(dt, var = "value", by = NULL,  quantiles = seq(.5,.95,by = .05))  {
   my_stats = 
@@ -576,7 +714,7 @@ smrs_by_grp = function(draws, var, grp.dt, calc.delta = F) {
                      round(upper90,ifelse(parameter == "slope_down",3,2)),")")] 
 }
 
-#' Calculate mean and sd over individual lecel parameters for each draw
+#' Calculate mean and sd over individual level parameters for each draw
 #' 
 #' @param draws a draws object from the posterior package
 #' @param var parameter to be extracted. Has to be a parameter with id-specific values.
@@ -668,30 +806,345 @@ make_VLCP_by_draw_ID = function(draws, days = seq(-10,30,by = 1), thin = 1) {
   return(VLCP_by_draw_ID)
 }
 
+#' Add bimodal error distribution to mean viral loads per age.
+#' The original model estimates well the mean and sd of vial loads for the total sample 
+#' and for sub groups (see posterior predictive plots). However, the basic model does
+#' not capture the bimodal nature of the data and hence underestimates the probability of 
+#' very low or very high loads. (Adding this to the original model did not work)
+#' This functions generate bimodal posterior predictions by estimating a bimodal distribution
+#' of viral load for each age group that is constrained to (a) have the same mean
+#' as the estimated mean from the original model and (b) reflect the bimodal distribution 
+#' of viral loads for the age group.
+#' 
+#' 
+#' @param dp vector model-estimated means for ages 0-100 (in steps of 1)
+#' @param AgeYearLoadData data table with viral loads and (rounded) age
+#' @param start_idx age year group with the largest sample size
+#' @param .draw number of draw from the mcmc estimation (used for debugging)
+#' @return a vector with posterior predictions that (should) follow a bimodal distribution
+mix_all = cmdstan_model(here("FPT/mix_s_all.stan"))
+add_mix = function(dp,AgeYearLoadData,start_idx,.draw,algo = "optimize") {
+  tmp = data.table(Age = 1:100, fitted = dp) %>% setkeyv("Age")
+  AgeYearLoadData %>% 
+    .[, m := mean(obs), by = .(Age)] %>% 
+    .[tmp, obs := obs - m + fitted] 
+  
+  AgeYearLoadData[tmp, fitted := fitted]
+  datalist = list(
+    N = nrow(AgeYearLoadData),
+    y = AgeYearLoadData$obs,
+    Age_idx = AgeYearLoadData$Age_idx,
+    mu = dp,
+    K = length(dp),
+    start = start_idx
+  )
+  
+  inits = function() {
+    list(delta_r = rnorm(datalist$K,0,.01),
+         delta_sd = runif(1,.01,.05),
+         delta_intecept = rnorm(1,0,.1),
+         theta_r = rnorm(datalist$K,0,.01),
+         theta_sd = runif(1,.01,.05),
+         theta_intercept = runif(1,.35,.45),
+         sigma1 = rnorm(1,1,.05),
+         sigma2 = rnorm(1,1,.05))
+  }
+ 
+  out <- tryCatch(
+    {
+      attempt = 1
+      tmp.out =  NULL
+      while( is.null(tmp.out) && attempt <= 20 ) {
+        attempt <- attempt + 1
+        try(
+          if (algo == "optimize") {
+            tmp.out <- mix_all$optimize(datalist, init = list(inits()))
+          } else {
+            tmp.out <- mix_all$variational(datalist, init = list(inits()),output_samples = 1) 
+          }
+        )
+      } 
+    },
+    error=function(cond) {
+      message(paste("Fitting not successful for .draw", .draw))
+      message("Here's the original error message:")
+      message(cond)
+      # Choose a return value in case of error
+      return(tmp.out)
+    },
+    warning=function(cond) {
+      message(paste("Fitting for .draw caused a warning", .draw))
+      message("Here's the original warning message:")
+      message(cond)
+      # Choose a return value in case of warning
+      return(tmp.out)
+    },
+    finally={
+    }
+  )
+  
+  if (is.null(tmp.out)) {
+    while( is.null(tmp.out) && attempt <= 20 ) {
+      attempt <- attempt + 1
+      try(
+        if (algo == "optimize") {
+          tmp.out <- mix_all$optimize(datalist, init = list(inits()))
+        } else {
+          tmp.out <- mix_all$variational(datalist, init = list(inits()),output_samples = 1) 
+        }
+      )
+    }
+  }
+  
+  try(
+    log10Load <- tmp.out$draws() %>% subset_draws("yhat") %>% as.numeric()
+    )
+  if (exists("log10Load")) {
+    m1 = tmp.out$draws() %>% subset_draws("mu1") %>% as.numeric()
+    m2 = tmp.out$draws() %>% subset_draws("mu2") %>% as.numeric()
+    sd1 = tmp.out$draws() %>% subset_draws("sigma1") %>% as.numeric()
+    sd2 = tmp.out$draws() %>% subset_draws("sigma2") %>% as.numeric()
+    mx = tmp.out$draws() %>% subset_draws("theta") %>% as.numeric()
+    ## probability of viral load > 9
+    p9 = 1-pnormMix(9, mean1 = m1, sd1 = sd1, mean2 = m2, sd2 = sd2, p.mix = (1-mx))
+  } else {
+    log10Load = p9 = rep(NA,100)
+  }
+ 
+  return(list(log10Load = log10Load, p9 = p9))
+}
+
+#' Helper function to parallelize estimation calculation of bimodal posterior predictions.
+#' 
+#' @param i number of draw to select relevant data (which were exported to cores)
+#' @return a vector with posterior predictions that (should) follow a bimodal distribution
+make_pp = function(i) {
+  dp = post_lin_pred[.draw == i & Age %in% unique(AgeYearLoadData$Age),log10Load]
+  return(add_mix(dp,AgeYearLoadData,start_idx,.draw = i,algo = algo))
+}
+
+worker_setup = function() {
+  library(here)
+  library(data.table)
+  library(magrittr)
+  library(posterior)
+  library(EnvStats)
+  library(cmdstanr)
+  mix_all = cmdstan_model(here("FPT/mix_s_all.stan"))
+}
+
+
 #' Calculate posterior predictions for first positive test
 #' 
 #' @param brms fit object
 #' @param ndt new data with columns PCR_Group TestCentreCategory Gender PCR Group and Age-Group
 #' @param wghts weights to weight according to Age
-#' @return a data.table with posterior predictions by Age and PAMS
-calc_post_lin_pred = function(bfit,ndt,wghts, sum.Group = "Group") {
-  setkeyv(wghts,"TestCentre.Group")
-  ndt = ndt[TestCentre.Group %in% unique(wghts$TestCentre.Group)]
+#' @sum.Group grouping variable 
+#' @param epred returns posterior expectations when `epred == T` and posterior predictions when `epred == F`
+#' calculating posterior expectations involves a post-processing step to reflect the bimodal viral load distribution.
+#' @grp name of the currently analyzed group, needed to extract agewise viral load distributions from raw data when `epred == F`
+#' @algo algorithm used for estimating bimodal distribution. "optimize" uses L-BFGS otherwise variational Bayes is used.
+#' optimize is faster but clearly not as reliable as variational Bayes in this application.
+#' @CP.basis only used when `epred = T`. Determines if culture probability is calculate from posterior expectations or from 
+#' posterior predictions. Using Culture positivity should be calculated from the more variable posterior expectations,
+#' but for educational purposes it can be useful to use calculate them from posterior expecations
+#' @return a data.table with posterior predictions for viral load and culture positivity by Age and PAMS.
+#' When `epred == T`, two types of posterior predictions for culture positivity (CP) are returned: CP is calculated 
+#' from posterior predictions of viral load, and CP.e is calculated from posterior expectations. 
+#' When `epred == F` the function also returns posterior predictions of the proportion of viral loads > 9.
+calc_post_lin_pred = function(bfit, CPpars, ndt, wghts , sum.Group = "Group", epred = T, algo = "variational") {
+  
+  if (exists("Age",wghts)) {
+    weighting_key = c("TestCentre.Group","Age")
+    if (wghts$Group[1] != "All") ndt = ndt[Group %in% unique(wghts$Group)]
+  } else {
+    weighting_key = c("TestCentre.Group")
+    ndt = ndt[TestCentre.Group %in% wghts$TestCentre.Group]
+  }
+  setkeyv(wghts,weighting_key)
+  
+  
+  
   group.by =  c("Group","Age",".draw")
   if (is.null(sum.Group)) group.by =  c("Age",".draw")
+  setkeyv(CPpars,".draw")
+  grp = ndt$Group[1]
+  #### posterior expectations for log10Load
   post_lin_pred = 
     ndt %>% 
     cbind(t(posterior_epred(bfit,
-                            newdata = ndt))) %>%
+                            newdata = ndt))) %>% 
     melt(id.vars = names(ndt),
          variable.name = ".draw",
          value.name = "log10Load") %>%
     .[, .draw := as.numeric(gsub("V","",.draw, perl = T))] %>%
-    setkeyv("TestCentre.Group") %>% 
+    setkeyv(weighting_key) %>% 
     .[wghts, weighted_load := log10Load * weight ] %>%
-    .[, .(log10Load = sum(weighted_load)),
-      by = group.by]
+    .[, .(log10Load = sum(weighted_load)), by = group.by] %>% 
+    setkeyv(".draw") %>% 
+    .[CPpars, e.CP := inv.logit(b_Intercept + b_log10Load * log10Load)]
+  
+  # posterior expectations for culture positivity must be calculated by 
+  # 1. calculating posterior predictions 
+  # 2. calculating culture positivity based on these posterior predictions
+  # 3. calculating expectations over these culture positivities
+  # important: fix error variance such that only one error variance is used
+  # for all values calculated for a posterior draw
+  if (epred == T) {
+    post_lin_pred.TC = 
+      ndt %>% 
+      cbind(t(posterior_epred(bfit, newdata = ndt))) %>% 
+      melt(id.vars = names(ndt),
+           variable.name = ".draw",
+           value.name = "log10Load") %>%
+      .[, .draw := as.numeric(gsub("V","",.draw, perl = T))] %>% 
+      setkeyv(c(".draw","TestCentreCategory","Age")) %>% 
+      setnames("log10Load","e.log10Load")  
+    
+    post_pred.TC = 
+      ndt %>% 
+      cbind(t(posterior_predict(bfit, newdata = ndt))) %>% 
+      melt(id.vars = names(ndt),
+           variable.name = ".draw",
+           value.name = "log10Load") %>%
+      .[, .draw := as.numeric(gsub("V","",.draw, perl = T))] %>% 
+      setkeyv(c(".draw","TestCentreCategory","Age")) %>% 
+      .[post_lin_pred.TC, e.log10Load := e.log10Load] %>% 
+      .[, var := log10Load - e.log10Load] 
+    
+    constant_var = 
+      post_pred.TC[Age == post_pred.TC$Age[1] & 
+                     TestCentre.Group == wghts$TestCentre.Group[1],
+                .(.draw,var)] %>% 
+      setkeyv(".draw")
+    
+    post_pred.TC %>% 
+      .[, var := NULL] %>% 
+      .[constant_var, log10Load := e.log10Load + var] 
+    
+    sigma  = 
+      bfit$fit %>% 
+      as_draws() %>% 
+      subset_draws(c("b_sigma_Intercept"))  %>% 
+      as_draws_dt() %>% 
+      .[, sigma := exp(b_sigma_Intercept)] %>% 
+      .[, b_sigma_Intercept := NULL] 
+    
+    post_lin_pred.CP = 
+      post_pred.TC %>% 
+      setkeyv(".draw") %>% 
+      .[CPpars, CP := inv.logit(b_Intercept + b_log10Load * log10Load)] %>% 
+      setkeyv(weighting_key) %>% 
+      .[wghts, CP_weighted := CP * weight] %>% 
+      .[, .(CP = sum(CP_weighted)), by = .(.draw,Age)] 
+    
+    setkeyv(post_lin_pred.CP,c("Age",".draw"))
+    setkeyv(post_lin_pred,c("Age",".draw"))
+    post_lin_pred[post_lin_pred.CP,CP := CP]
+    
+    setkeyv(post_lin_pred,".draw")
+    setkeyv(sigma,".draw")
+    post_lin_pred %>% 
+      .[constant_var, log10Load.p := log10Load + var] %>% 
+      .[sigma, p9 := 1-pnorm(9,log10Load,sigma)]
+    
+  } else if (epred == F) {
+    ## AgeYearLoadData contains observed bimodal distributions of viral load
+    ## which are incorporated with a post-processing step into the posterior predictions
+    AgeYearLoadData = 
+      bfit$data %>% 
+      data.table() %>% 
+      .[Age > 100, Age := 100] %>% 
+      .[ceiling(Age) %in% unique(ndt$Age)]
+    if (grp != "All") {
+      AgeYearLoadData = 
+        AgeYearLoadData%>% 
+        .[Group == grp,.(Age,log10Load)] 
+    } 
+    AgeYearLoadData = 
+      AgeYearLoadData %>% 
+      .[, Age := ceiling(Age)] %>% 
+      .[, .(Age, log10Load)]
+     
+    
+    # add missing age years
+    missing = setdiff(1:100,unique(AgeYearLoadData$Age))
+    if (length(missing) > 0) {
+      imp = c()
+      for (a in missing) {
+        ages = seq(-5,5,1) + a
+        ages = ages[ages!=a] %>% intersect(unique(AgeYearLoadData$Age))
+        n = AgeYearLoadData[Age %in% ages, .(N = .N), by = .(Age)][,N] %>% mean()
+        imp = rbind(
+          imp,
+          data.table(log10Load = sample(AgeYearLoadData[Age %in% ages,log10Load],1), Age = a)
+        )
+      }
+      AgeYearLoadData = 
+        rbind(AgeYearLoadData,
+              imp)
+    }
+    
+    setkey(AgeYearLoadData,"Age")
+    setkey(post_lin_pred,"Age")
+    setnames(AgeYearLoadData,"log10Load","obs")
+    
+    AgeYearLoadData[, Age_idx := as.numeric(factor(Age))]
+    
+    ## the mean of the first mixture evolves as a random walk
+    ## we take the age group with the largest N as the starting point for this
+    start_idx = AgeYearLoadData[, .(N = .N), by = .(Age)]
+    start_idx = which(start_idx$N == max(start_idx$N))
+    ## use parallelization to fit mixture models
+    n_clust = ifelse(Sys.info()["sysname"] == "Darwin",4,16)
+    clust <- makeCluster(n_clust)
+    clusterExport(clust,varlist = "worker_setup")
+    clusterEvalQ(clust,worker_setup())
+    clusterExport(clust,varlist = c("add_mix","post_lin_pred","AgeYearLoadData","make_pp","start_idx","algo"), envir = environment())
+    a <- parLapply(clust, sapply(1:max(post_lin_pred$.draw), list), make_pp)
+    stopCluster(clust)
+    pp = do.call(rbind,lapply(a, function(x) cbind(x[[1]],x[[2]])))
+    setkeyv(post_lin_pred,c(".draw","Age"))
+    post_lin_pred[,e.log10Load := pp[,1]]
+    post_lin_pred[,p9 := pp[,2]]
+    save(post_lin_pred,file = paste0("tmp_postlinpred_",grp,".Rdata"))
+    # check for bad fits, i.e. models with implausible predictions
+    # and re-estimate models for those.
+    has_bad_fits = T
+    j = 0
+    while (has_bad_fits == T & j < 500) {
+      j = j+1
+      badfits =
+        rbind(post_lin_pred[p9 > .2, .(N = .N), by = .(Group, .draw)][N > 3],
+              post_lin_pred[e.log10Load < 1 | e.log10Load > 12, .(N = .N), by = .(Group, .draw)][N > 3],
+              post_lin_pred[e.log10Load > 13, .(N = .N), by = .(Group, .draw)],
+              post_lin_pred[log10Load < -1, .(N = .N), by = .(Group, .draw)]) %>%
+        .[, .(Group,.draw)] %>%
+        unique()
+      has_bad_fits = ifelse(nrow(badfits > 0),T,F)
+      for (k in 1:nrow(badfits)) {
+        post_lin_pred[Group == badfits$Group[k] & .draw == badfits$.draw[k], p9 := NA]
+        post_lin_pred[Group == badfits$Group[k] & .draw == badfits$.draw[k], e.log10Load := NA]
+      }
+      for (d in unique(post_lin_pred[is.na(e.log10Load),.draw])) {
+        dp = post_lin_pred[.draw == d & Age %in% unique(AgeYearLoadData$Age),log10Load]
+        tmp =  add_mix(dp,AgeYearLoadData,start_idx,d,algo)
+        post_lin_pred[.draw == d, e.log10Load := tmp[[1]]]
+        post_lin_pred[.draw == d, p9 := tmp[[2]]]
+      }
+    }
+    # Calculate posterior predictions for culture positivity
+    post_lin_pred %>% 
+      setkeyv(".draw") %>% 
+      .[, log10Load := NULL] %>% 
+      setnames("e.log10Load","log10Load") %>% 
+      .[CPpars, CP := inv.logit(b_Intercept + b_log10Load * log10Load)] 
+    
+  }
+  return(post_lin_pred)
 }
+
+
 
 #' Calculate percent positive culture by age while correctly weighting individual for each age group
 #' 
@@ -700,10 +1153,10 @@ calc_post_lin_pred = function(bfit,ndt,wghts, sum.Group = "Group") {
 #' @param w.var name of variable with weights 
 #' @return a data.table with the posterior distribution of culture positivities by age
 predict_VLCP_by_Age = 
-  function(post_lin_pred,weights,w.var, get.stats = T) {
+  function(post_lin_pred,weights,w.var, get.stats = T, CP.var = "CP") {
     stats_by_age = 
       post_lin_pred %>% 
-      .[weights, `:=`(wVL = log10Load * get(w.var), wCP = CP * get(w.var))] %>% 
+      .[weights, `:=`(wVL = log10Load * get(w.var), wCP = get(CP.var) * get(w.var))] %>% 
       .[, .(log10Load = sum(wVL), CP = sum(wCP)), by = .(Age,.draw)] %>% 
       melt(id.vars = c("Age",".draw"), variable.name = "outcome") 
     
@@ -716,11 +1169,35 @@ predict_VLCP_by_Age =
     }
   }
 
+#' Calculate percent positive culture by age while correctly weighting subjects for each age group
+#' 
+#' @param post_lin_pred data.table with posterior linear predictions of log10 viral load
+#' @param sample PAMS, Other, Hospitalized, or All
+#' @return a data.table with the posterior distribution of culture positivities by age
+stats_VLCP_by_Age = 
+  function(post_lin_pred, grp.sample = NULL, get.stats = T, CP.var = "CP") {
+    stats_by_age = 
+      post_lin_pred %>% 
+      .[Group %in% grp.sample] %>% 
+      melt(id.vars = c("Age",".draw","Group"),
+           variable.name = "outcome",
+           measure.vars = c("log10Load",CP.var)) 
+    
+    if (get.stats == T) {
+      return(
+        stats_by_age %>% 
+          get_stats(var = "value", by = c("Age", "outcome")) %>% 
+        .[, sample := grp.sample])
+    } else {
+      return(stats_by_age)
+    }
+  }
+
 #' Calculate viral load or culture positivity difference
 #' 
 #' @param dt a data.table with posterior predictions for ages 0:100
 #' @param age_group_N data.table with number of subjects per age year
-#' @param CPstat indicator to calculate either risk differences (RD) or risk rations (RR)
+#' @param CPstat indicator to calculate either risk differences (RD) or risk ratios (RR)
 #' @return a data.table statistics for all differences
 calc_diff = function(dt, age_group_N, CPstat = "RD") {
   age_group_N %>% 
@@ -763,7 +1240,7 @@ calc_diff = function(dt, age_group_N, CPstat = "RD") {
               variable.name = "comparison")
 }
 
-#' Get parameter names to calculate conditional effects for time  course model
+#' Get parameter names to calculate conditional effects for time course model
 #' 
 #' @param var variable for which conditional effects are calculated
 #' @param pred predictor for which conditional effects are calculated
@@ -827,7 +1304,7 @@ cond_eff_cont = function(var, predictor = "Age") {
     melt(id.vars = c(predictor,"ID"), variable.name = ".draw")
   
   if (predictor == "Age")
-    yhat[, Age := round(Age,1)]
+    yhat[, Age := round(Age,round_Age)]
   yhat = 
     yhat[, list(value = collapse::fmean(value)), by = c(".draw",predictor)]
   
@@ -843,8 +1320,11 @@ cond_eff_cont = function(var, predictor = "Age") {
 #' 
 #' @param var variable for which conditional effects are calculated
 #' @param pred predictor for which conditional effects are calculated
+#' @param adjust if `adjust == T` Age effects do not include effects of PAMS, hospitalization, or gender.
+#' If `adjust == F` age effects include these other effects
+#' @param setPGH a named vector with values for PAMS, gender, and hospitalization. Is only used if `adjust == F`.
 #' @return `data.table` with mean and quantiles for conditional predictions
-cond_eff_contPGH = function(var, predictor = "Age") {
+cond_eff_contPGH = function(var, predictor = "Age", round_Age = 1, adjust = T, setPGH = NULL) {
   
   ppost = get_cond_effect_params(var,predictor)
   
@@ -854,12 +1334,42 @@ cond_eff_contPGH = function(var, predictor = "Age") {
   B_predictor = datalist[[paste0("B","_",predictor)]]
   my_predictor = datalist[[predictor]]
   
+  
+  if (adjust == F) {
+    # Adjustment of age effects for Hospitalization and PAMS is done
+    # with smoothed probabilities to be hospitalized / PAMS because
+    # the raw data is noisy, especially for the youngest.
+    # smoothed proportions are calculated with the function est_TC_PHG_by_Age()
+    load(here("TC_PHG_by_Age.Rdata"))
+  } 
+  
+  id_vars = day_data[day == 0, c(predictor,"ID"), with = F]
+  
+  if (!is.null(setPGH)) {
+    Age = as.numeric(0:100)
+    sAge = my_predictor = (Age-mean(day_data[day == 0,Age]))/sd(day_data[day == 0,Age])
+    B_predictor = 
+      t(bs(Age,
+           degree=attr(datalist$B_Age,"degree"),
+           knots = attr(datalist$B_Age,"knots")))
+    for (p in names(setPGH)) {
+      p.cols = grep(p,colnames(X_PGH))
+      X_PGH[,p.cols] = setPGH[p]
+    }
+    X_PGH = X_PGH[1:length(my_predictor),]
+    id_vars = data.table(Age = Age, ID = NA)
+  }
+    
+  
   yhat = 
     cbind(
-      day_data[day == 0, c(predictor,"ID"), with = F],
+      id_vars,
       do.call(rbind,
               lapply(1:dim(ppost$intercept)[1], 
                      function(j) {
+                       if (adjust == F) {
+                         X_PGH[,c("PAMS1","Gender","Hospitalized")] = as.matrix(TC_PHG_by_Age[.draw == j,.(PAMS1,Gender,Hospitalized)])
+                       }
                        ppost$intercept[j] + 
                          ppost$a0[j] * my_predictor + 
                          ppost$a[j,] %*%  B_predictor + 
@@ -867,54 +1377,15 @@ cond_eff_contPGH = function(var, predictor = "Age") {
               )
       ) %>% 
         t()
-    ) %>%
+    ) %>% 
     melt(id.vars = c(predictor,"ID"), variable.name = ".draw")
   
-  if (predictor == "Age")
-    yhat[, Age := round(Age,1)]
-  yhat = 
-    yhat[, list(value = collapse::fmean(value)), by = c(".draw",predictor)]
-  
-  yhat[, value := exp(value)]
-  if (var == "slope_down")
-    yhat[, value := -value]
-  
-  yhat[, parameter := var]
-  return(yhat)
-}
-
-#' Calculate conditional effects for time course model for binary predictors
-#' 
-#' @param var variable for which conditional effects are calculated
-#' @param pred predictor for which conditional effects are calculated
-#' @return `data.table` with mean and quantiles for conditional predictions
-cond_eff_bin = function(var, predictor = "PAMS1", Age_conditioned = mean(day_data[day == 0, Age])) {
-  ppost = get_cond_effect_params(var,"Age")
-  
-  X_PG = datalist[["X_PG"]] 
-  X_PG[,setdiff(colnames(X_PG),predictor)] = mean(X_PG[,setdiff(colnames(X_PG),predictor)])
-  X_PG = unique(X_PG)
-  B_Age = datalist[["B_Age"]]
-  Age = datalist[["Age"]]
-  idx = which.min(abs(day_data[day == 0, Age] - Age_conditioned))[1]
-  B_Age = matrix(B_Age[,idx],ncol = 1)
-  Age = Age[idx]
-  
-  yhat = 
-    cbind(
-      data.table(X_PG)[,predictor, with = F],
-      do.call(rbind,
-              lapply(1:dim(ppost$intercept)[1], 
-                     function(j) {
-                       as.numeric(ppost$intercept[j,]) + 
-                         as.numeric(ppost$a0[j,] * Age) + 
-                         as.numeric(ppost$a[j,] %*% B_Age) + 
-                         t(X_PG %*% t(ppost$b[j,])) }
-              )
-      ) %>% 
-        t()
-    ) %>%
-    melt(id.vars = predictor, variable.name = ".draw")
+  if (round_Age <= 1 & is.null(setPGH)) {
+    if (predictor == "Age")
+      yhat[, Age := round(Age,round_Age)]
+    yhat = 
+      yhat[, list(value = collapse::fmean(value)), by = c(".draw",predictor)]
+  }
   
   yhat[, value := exp(value)]
   if (var == "slope_down")
@@ -928,14 +1399,15 @@ cond_eff_bin = function(var, predictor = "PAMS1", Age_conditioned = mean(day_dat
 
 theme_set(
   theme_minimal() + 
-    theme(axis.ticks.length = unit(2,"pt"),
+    theme(plot.title.position = "plot",
+          axis.ticks.length = unit(2,"pt"),
           axis.title = element_text(size = 11,
                                     margin = margin(0,0,0,0)),
           axis.text = element_text(size = 10,
                                    margin = margin(0,0,0,0)),
           strip.text.x = element_text(size = 11,
                                       margin = margin(0,0,.5,0)),
-          plot.background = element_rect(linetype = "blank"),
+          plot.background = element_rect(linetype = "blank",fill = "transparent", color = NA),
           axis.line = element_line(),
           panel.grid.major = element_blank(),
           panel.grid.minor = element_blank()
@@ -944,16 +1416,17 @@ theme_set(
 my_clrs = c("black","#DC0000FF","#4DBBD5FF")
 my_clrs = c("black","red","blue")
 
-#' Add manual scales with 3 colors, black, rad, and blue, for fill and color to ggplot plot
+
+#' Add manual scales with 3 colors, black, red, and blue, for fill and colour to ggplot plot
 #' 
-#' @return `list` list with manual scales for fill and color
-black_red_blue = function() {
+#' @return `list` list with manual scales for fill and colour
+red_blue_black = function() {
   list(
-    scale_colour_manual(values = my_clrs), 
-    scale_fill_manual(values = my_clrs))
+    scale_colour_manual(values = my_clrs[c(2,3,1)]), 
+    scale_fill_manual(values = my_clrs[c(2,3,1)]))
 }
 
-#' Add manual scales with two colors red and blue, for fill and color to ggplot plot
+#' Add manual scales with two colours red and blue, for fill and colour to ggplot plot
 #' 
 #' @return `list` list with manual scales for fill and color
 red_blue = function(o = 2:3) {
@@ -962,9 +1435,9 @@ red_blue = function(o = 2:3) {
     scale_fill_manual(values = my_clrs[o]))
 }
 
-#' Add manual scales with two colors, green and brown,  for fill and color to ggplot plot
+#' Add manual scales with two colours, green and brown, for fill and colour to ggplot plot
 #' 
-#' @return `list` list with manual scales for fill and color
+#' @return `list` list with manual scales for fill and colour
 green_brown = function() {
   list(
     scale_colour_manual(values = c("#00A087FF","#7E6148FF")), 
@@ -1023,16 +1496,16 @@ theme_marginal = function() {
 #' Expand x and y axes in ggplot
 #' 
 #' @return `list` with instructions to expand axes
-gg_expand = function() {
+gg_expand = function(x1=0, x2=0, y1=.01, y2=0) {
   list(
-    scale_x_continuous(expand = expansion(0,0)), 
-    scale_y_continuous(expand = expansion(.01,0)))
+    scale_x_continuous(expand = expansion(x1,x2)), 
+    scale_y_continuous(expand = expansion(y1,y2)))
 }
 
 #' Add grid lines to ggplot
 #' 
 #' @param axis is a character X, y, or xy indicating for which axis grid lines are added
-#' @return `theme` with instructions to add grod lines
+#' @return `theme` with instructions to add grid lines
 gg_add_grid = function(axis = "xy") {
   if (axis == "xy") {
     my_grid = theme(panel.grid.major = element_line(colour="grey", size=0.05))
@@ -1044,6 +1517,8 @@ gg_add_grid = function(axis = "xy") {
   return(my_grid)
 }
 
+#### Plotting results ####
+
 #' Add progressively shaded credible interval lines to ggplot
 #' 
 #' @param data is a `data.table` or `data.frame` in wide format with mean and quantiles 
@@ -1051,11 +1526,11 @@ gg_add_grid = function(axis = "xy") {
 #' @param size is the line width
 #' @param alpha is the transparency level for each ribbon
 #' @return a ggplot layer with a progressively shaded confidence ribbon 
-conf_linerange = function(data, size = 1.5, alpha = .05) {
-  lapply(seq(50,90,5), 
+conf_linerange = function(data, size = 1.5, alpha = .05, conf_levels = seq(50,90,5), color = NULL) {
+  lapply(conf_levels, 
          function(x) 
            geom_linerange(alpha = alpha,
-                          aes_string(ymin = paste0("lower",x), ymax = paste0("upper",x)),
+                          aes_string(ymin = paste0("lower",x), ymax = paste0("upper",x), color = color),
                           position = position_dodge(width = dodge_with),
                           size = size))
 } 
@@ -1064,26 +1539,53 @@ conf_linerange = function(data, size = 1.5, alpha = .05) {
 #' 
 #' @param data is a `data.table` or `data.frame` in wide format with mean and quantiles 
 #' lower50, lower55, lower95 ,... upper50, upper55, upper95 in columns 
-#' @param fill is a character indicating the fill color or a variable in the data
+#' @param fill is a character indicating the fill colour or a variable in the data
 #' @param alpha is the transparency level for each ribbon
 #' @return a ggplot layer with a progressively shaded confidence ribbon 
-conf_ribbon = function(data, fill = "red", alpha = .05) {
-  conf_levels = grep("lower",names(data), value = T) %>% gsub("lower","",.)
+conf_ribbon = function(data, fill = "red", alpha = .05, conf_levels = seq(50,90,5)) {
   if (exists(fill,data)) {
     lapply(conf_levels, 
            function(x) 
              geom_ribbon(alpha = alpha, color = NA,
-                         aes_string(ymin = paste0("lower",x), ymax = paste0("upper",x),fill = fill)))
+                         aes_string(ymin = paste0("lower",x), 
+                                    ymax = paste0("upper",x),fill = fill)))
   } else {
     lapply(conf_levels, 
            function(x) 
              geom_ribbon(alpha = alpha, fill = fill,color = NA,
-                         aes_string(ymin = paste0("lower",x), ymax = paste0("upper",x))))
+                         aes_string(ymin = paste0("lower",x), 
+                                    ymax = paste0("upper",x))))
   }
 } 
 
-#### Plotting results ####
 
+#' Add progressively shaded credible interal ribbons to ggplot
+#' 
+#' @param data is a `data.table` or `data.frame` in wide format with mean and quantiles 
+#' lower50, lower55, lower95 ,... upper50, upper55, upper95 in columns 
+#' @param fill is a character indicating the fill color or a variable in the data
+#' @param alpha is the transparency level for each ribbon
+#' @return a ggplot layer with a progressively shaded confidence ribbon 
+conf_ribbon.hdi = function(data, fill = "red", alpha = .05, conf_levels = seq(50,90,5)) {
+    if (exists(fill,data)) {
+      lapply(conf_levels, 
+             function(x) 
+               geom_ribbon(data = data,alpha = alpha, color = NA,
+                           aes_string(ymin = paste0("lower",x[[1]][1]), 
+                                      ymax = paste0("upper",x[[1]][1]),
+                                      fill = fill, 
+                                      group = ifelse(exists("hdi.group",data),"hdi.group","NULL"))))
+    } else {
+      lapply(conf_levels, 
+             function(x) 
+               geom_ribbon(data = data,alpha = alpha, fill = fill,color = NA,
+                           aes_string(ymin = paste0("lower",x), 
+                                      ymax = paste0("upper",x),
+                                      group = ifelse(exists("hdi.group",data),"hdi.group","NULL"))))
+    }
+  
+  
+} 
 
 #' Plot time course of viral load or culture positivity.
 #' each individual is plotted as a blue line and 
@@ -1125,7 +1627,7 @@ plot_by_day = function(by_day, by_day_id = NULL, y.var, xlim = c(-7.5,27.5), yli
 #' 
 #' @param drws is an object (`posterior` `draws` or `data.table`)
 #' @param labels data.table with text to be shown on histogram (thought statistics)
-#' @param fill variable name that determines fill color. if `is.null( fill)` the fill color is blue 
+#' @param fill variable name that determines fill colour. if `is.null( fill)` the fill colour is blue 
 #' @param value.var is the name of the variable for which histogram is drawn
 #' @param nrow is the number of rows in the `facet_wrap`
 #' @return a ggplot plot
@@ -1339,7 +1841,7 @@ plot_delta_grps = function(by_day_draws, y.var = "log10Load", grp.dt, stat = "RD
 #' @param by_day_draws is a `data.table` with time courses for each individual and posterior draw
 #' @param y.var the variable for which the difference is calculated 
 #' @param grp.dt is a data.table with a columns with IDs and a second column with the grouping variable
-#' @param stat is "RD" and "RR" for risk difference and risk ration, respectively 
+#' @param stat is "RD" and "RR" for risk difference and risk ratio, respectively 
 #' @return a ggplot with time courses and credible intervals
 plot_by_day_grp = function(by_day_grp, grp.var, grp.dt, y.var = "mean") {
   
@@ -1500,7 +2002,7 @@ plot_key_days_by_age = function(by_dayIDdraw, target.var = "value", var, grp.var
   plot_by_Age = 
     ggplot(by_dayAgeGrp, aes_string(x = "days_after_peak_load", y = var, color = grp.var, group = grp.var)) + 
     geom_point(position = position_dodge(width = dodge_with), size = .5) + 
-    conf_linerange(by_dayAgeGrp) + 
+    conf_linerange(by_dayAgeGrp, color =  grp.var) + 
     xlab("Days from peak viral load") +
     theme(legend.position = c(.7,1),
           legend.text = element_text(size = 4),
@@ -1538,8 +2040,11 @@ plot_key_days_by_age = function(by_dayIDdraw, target.var = "value", var, grp.var
 
 
 #### Misc ####
-sprint_stat = function(draws, digits = 1, my_quantiles = c(.05,.95)) {
-  m = mean(draws)
+sprint_stat = function(draws, digits = 1, my_quantiles = c(.05,.95), avg = "mean") {
+  m = ifelse(avg =="mean",
+             mean(draws),
+             median(draws))
+  
   qs = quantile(draws,my_quantiles)
   return(sprintf(paste0("%.",digits,"f (%.",digits,"f, %.",digits,"f)"),
                  m,
@@ -1578,7 +2083,7 @@ se = function(x) {return(sd(x)/sqrt(length(x)-1))}
 
 #' Generate initial values to fit Stan model for age-viral load association
 #' 
-#' @param bfit brms fit object of model that shall be fitted again. this is here only used to get parameter names and dimensions.
+#' @param bfit brms fit object of model that shall be fitted again. this is only used here to get parameter names and dimensions.
 #' @return a list with inital values
 make_age_fit_inits = function(bfit) {
   pars = grep("^r_|^lp__|^s_|_Intercept$",names(bfit$fit@par_dims),invert = T, value = T)
@@ -1590,6 +2095,14 @@ make_age_fit_inits = function(bfit) {
     if (length(pdim) == 0) {
       if (grepl("^imp_|^sd_|^sds_|^Intercept$",p)) {
         inits[[p]] = runif(1)/10
+      } else if (p == "theta") {
+        inits[[p]] = .5
+      } else if (p %in% c("sigmaa","sigmab")) {
+        inits[[p]] = abs(rnorm(0,2))
+      } else if (p == "mxa") {
+        inits[[p]] = runif(1)*-1.5
+      } else if (p == "mxb") {
+        inits[[p]] = runif(1)*1.5
       } else {
         inits[[p]] = rnorm(1,0,.1)
       }
@@ -1616,21 +2129,29 @@ make_age_fit_inits = function(bfit) {
 #' @param paired indicator if only centres are used that reported both B.1.1.7 and non-B.1.1.7 cases
 #' @return data table with results and description of model and sample
 get_B117_stats = function(bfit,model,window,paired = "No") {
+  draws = bfit$fit %>% 
+    as_draws()
   effect.B117 = 
-    bfit$fit %>% 
-    as_draws() %>% 
+    draws %>% 
     subset_draws("b_B117", regex = T) %>% 
     as.numeric() %>% 
     sprint_stat(2)
   
+  VL = 
+    draws %>% 
+    subset_draws(c("b_Intercept","b_B117B117")) %>% 
+    as_draws_dt() %>% 
+    .[, load_wt := b_Intercept] %>% 
+    .[, load_B.1.1.7 := b_Intercept + b_B117B117]
+
   return(
     data.table(
       Window = window,
-      Adjusted = ifelse(grepl("adjusted|re.adjusted",model),"Yes","No"),
-      `Rand. eff`  = ifelse(grepl("re",model),"Yes","No"),
-      Paired =  paired,
+      Model = model,
       `N B.1.1.7` = sum(bfit$data$B117 == "B117" | bfit$data$B117 == 1),
       `N non-B.1.1.7` = nrow(bfit$data) - sum(bfit$data$B117 == "B117" | bfit$data$B117 == 1),
+      `Load B.1.1.7` = sprint_stat(VL$load_B.1.1.7,1),
+      `Load non-B.1.1.7` = sprint_stat(VL$load_wt,1),
       `Effect B.1.1.7` = effect.B117
     )
   )
@@ -1648,13 +2169,27 @@ fit_B117_model = function(model,data,fn,adapt_delta = .8) {
   if (file.exists(fn)) {
     load(fn)
   } else {
-    Bfit = 
-      brm(model,
-          data = data,
-          backend = "cmdstanr",
-          iter = 3500,
-          warmup = 1000,
-          control = list(adapt_delta = adapt_delta))
+    
+    if(Sys.info()["sysname"] == "Darwin") {
+      Bfit = 
+        brm(model,
+            data = data,
+            backend = "cmdstanr",
+            iter = 3500,
+            warmup = 1000,
+            control = list(adapt_delta = adapt_delta))
+    } else {
+      Bfit = 
+        brm(model,
+            data = data,
+            backend = "cmdstanr",
+            chains = 4,
+            cores = 16,
+            threads = threading(4),
+            iter = 3500,
+            warmup = 1000,
+            control = list(adapt_delta = adapt_delta))
+    }
     
     draws = as_draws(Bfit$fit)
     sampler_params = 
