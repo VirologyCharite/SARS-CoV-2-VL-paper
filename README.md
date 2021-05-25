@@ -8,7 +8,7 @@ _Science_ on May 25, 2021.
 
 # Data
 
-The following files are available.
+The following files are available in the `data` directory.
 
 ## viral-load-with-negatives.tsv.zip
 
@@ -16,7 +16,7 @@ A [zip](https://en.wikipedia.org/wiki/ZIP_(file_format))
 [TAB-separated values](https://en.wikipedia.org/wiki/Tab-separated_values)
 file containing 879,624 RT-PCR results.  The same data is also available in
 compressed [bzip2](https://en.wikipedia.org/wiki/Bzip2) format, in
-[viral-load-with-negatives.tsv.bz2](viral-load-with-negatives.tsv.bz2).
+[viral-load-with-negatives.tsv.bz2](data/viral-load-with-negatives.tsv.bz2).
 
 Each row has 13 fields, as follows
 
