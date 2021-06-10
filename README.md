@@ -144,3 +144,7 @@ Contains various [R](https://www.r-project.org/) utility functions.
 A [Stan](https://mc-stan.org/) model to estimate parameters for a mixture
 of two normal distributions. This is used to generate "post-processed"
 posterior predictions for the first-positive RT-PCR test model.
+
+## TC_APGHB117_simple_shiftw25o.stan
+
+A [Stan](https://mc-stan.org/) model to estimate parameters viral load time courses.
