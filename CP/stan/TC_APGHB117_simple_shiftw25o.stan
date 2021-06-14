@@ -141,7 +141,7 @@ transformed parameters {
      // test-centre category based random effects
      for (g in 1:G) {
        shift[g] = b_shift[g] + shift_centre1[centre1[g]];
-       log_intercept[g] += int_centre1[centre1[g]] + int_ld_centre[g[]];
+       log_intercept[g] += int_centre1[centre1[g]] + int_ld_centre[ld_centre[g]];
        log_slope_down[g] += slope_down_ld_centre[ld_centre[g]];
        log_slope_up[g] += slope_up_ld_centre[ld_centre[g]];
      }
