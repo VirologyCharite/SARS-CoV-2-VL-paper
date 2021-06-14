@@ -67,10 +67,6 @@ parameters {
   vector[N_centre1] int_centre1_raw;
   real<lower=0> slope_down_ld_centre_sigma;
   vector[N_ld_centre] slope_down_ld_centre_raw;
-  real<lower=0> slope_up_ld_centre_sigma;
-  vector[N_ld_centre] slope_up_ld_centre_raw;
-  real<lower=0> int_ld_centre_sigma;
-  vector[N_ld_centre] int_ld_centre_raw;
   
   // smoothness parameter for logistic weight function
   real<lower=0> beta_sweight_mu;
@@ -120,8 +116,6 @@ transformed parameters {
   { // calculate model parameters
      vector[N_centre1] shift_centre1 = shift_centre1_sigma * shift_centre1_raw;
      vector[N_centre1] int_centre1 = int_centre1_sigma * int_centre1_raw;
-     vector[N_ld_centre] slope_up_ld_centre = slope_up_ld_centre_sigma * slope_up_ld_centre_raw;
-     vector[N_ld_centre] int_ld_centre = int_ld_centre_sigma * int_ld_centre_raw;
      vector[N_ld_centre] slope_down_ld_centre = slope_down_ld_centre_sigma * slope_down_ld_centre_raw;
      vector[G] log_intercept = 
                  log_intercept_mu + // intercept (fixed effect [FE], group level mean)
@@ -141,9 +135,8 @@ transformed parameters {
      // test-centre category based random effects
      for (g in 1:G) {
        shift[g] = b_shift[g] + shift_centre1[centre1[g]];
-       log_intercept[g] += int_centre1[centre1[g]] + int_ld_centre[g[]];
+       log_intercept[g] += int_centre1[centre1[g]];
        log_slope_down[g] += slope_down_ld_centre[ld_centre[g]];
-       log_slope_up[g] += slope_up_ld_centre[ld_centre[g]];
      }
      // apply link function
      intercept = exp(log_intercept);
