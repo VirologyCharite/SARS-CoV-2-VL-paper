@@ -1513,33 +1513,48 @@ lines(prior_sample_densities[["time2peak"]])
 `r ifelse(show_code == T,"Data for the Stan model are generated in a custom function (see utils.R).","")` To estimate model parameters, we used 4 independent chains, each with 1000 warm-up and 1000 post warm-up samples. Prior analysis showed that 4000 post-warm-up samples produced sufficient effective samples to reliably estimate 90% credible intervals for parameters of interest. Here, we only show the code for the analysis of the full date set (which takes around 6 hours with 4 parallel chains on an Amazon EC2 c5d.2xlarge instance).
 
 ```{r estimate_time_model, eval = F}
-make_time_course_standata(
-  selection = 3, # minimum number of data points per participants
-  max_diff_load_12perday = 5, # maximum allowed per day viral load increases 
-  imputation_limit = 3 # maximum value of imputed viral load for negative tests
-) %>% 
-  list2env(.GlobalEnv)
+# minimum number of data points per subjects
+my_selections = 3:9
 
-sm = cmdstan_model(here(paste0("CP/stan/",model,".stan")))
-csf = sm$sample(data = datalist,
-                iter_warmup = 1000,
-                iter_sampling = 1000,
-                adapt_delta = .8,
-                max_treedepth = 10,
-                init = lapply(1:4, function(x) make_TC_inits()),
-                seed = 123)
-
-draws = csf$draws()
-
-ss = 
-  draws %>% 
-  summarise_draws() %>% 
-  data.table() 
-
-sampler_diags = 
-  csf$sampler_diagnostics() %>% 
-  as_draws_df() %>% 
-  data.table()
+# run analyses for subjects with different
+# minimum number of data points per subjects
+for (selection in my_selections) {
+  make_time_course_standata(
+    selection = selection,      # minimum number of data points per participants
+    max_diff_load_12perday = 5, # maximum allowed per day viral load increases 
+    imputation_limit = 3) %>%   # maximum value of imputed viral load for negative tests
+    list2env(.GlobalEnv)
+  
+  sm = cmdstan_model(here(paste0("CP/stan/",model,".stan")))
+  
+  csf = sm$sample(
+    data = datalist,
+    iter_warmup = 1000,
+    iter_sampling = 1000,
+    adapt_delta = .8,
+    max_treedepth = 10,
+    init = lapply(1:4, function(x) make_TC_inits(datalist)),
+    seed = 123)
+  
+  draws = csf$draws()
+  
+  ss = 
+    draws %>% 
+    summarise_draws() %>% 
+    data.table() 
+  sampler_diags = 
+    csf$sampler_diagnostics() %>% 
+    as_draws_df() %>% 
+    data.table()
+  inits = csf$init()
+  basic_filename = 
+    here(
+      paste0("CP/fits/w25o/",
+             model,
+             "_sel",selection))
+  save(csf, ss, day_data, datalist, sampler_diags, inits,
+       file = paste0(basic_filename,".Rdata"))
+}
 ```
 
 ```{r load_time_model, echo=F}
