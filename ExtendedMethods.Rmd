@@ -884,7 +884,7 @@ bdata =
   .[, PCR_Gender_Group := factor(paste0(PCR,"_",Gender,"_",Group))] %>%
   .[, PCR_Group := factor(paste0(PCR,"_",Group))] %>%
   .[, fAgeGroup := factor(AgeGroup, ordered = F)] %>% 
-  .bdata[, Male := ifelse(Gender == "M",1,ifelse(Gender == "F",0,.5))]
+  .[, Male := ifelse(Gender == "M",1,ifelse(Gender == "F",0,.5))]
 
 
 model_formula = 
