@@ -211,7 +211,8 @@ time_course_table =
   .[day == 0, 
     list(`N time` = .N),
     by = .(`Age category`)] %>% 
-  .[order(`Age category`)]
+  .[order(`Age category`)] %>%
+  .[!is.na(`Age category`)]
 
 dt[, positive := ifelse(is.na(log10Load),F,T)]
 
