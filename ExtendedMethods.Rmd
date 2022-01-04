@@ -1059,7 +1059,9 @@ obs_by_age =
            upper = mean(log10Load) + 1.96 * sd(log10Load)/sqrt(.N),
            N = .N),
     by = .(Age_rounded,Group)] %>% 
-  .[, `Test result` := factor("observed",levels = c("observed","modeled"))]
+  .[, `Test result` := factor("observed",levels = c("observed","modeled"))] %>%
+  .[, lower := ifelse(is.na(lower), log10Load, lower)] %>%
+  .[, upper := ifelse(is.na(upper), log10Load, upper)]
 
 obs_by_age_all = 
   bfitdata[Age_rounded < 26] %>% 
