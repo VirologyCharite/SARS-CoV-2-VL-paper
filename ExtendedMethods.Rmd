@@ -797,7 +797,6 @@ ggplot(culture_data, aes(x = log10Load, fill = Study, color = culture_positive))
   facet_wrap(~Study, nrow = 1, scale = "free_y") + 
   theme(legend.position = "top") + 
   theme(legend.position = "none")
-rm(merged_data)
 ```
 
 We estimated a Bayesian hierarchical logistic regressions in rstanarm [@rstanarm1] for the three datasets to investigate if the association between viral load and positive culture outcome is sufficiently similar to pool the data from these studies:
