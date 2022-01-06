@@ -3279,7 +3279,6 @@ ggsave(paramplot,
        width = 30,
        units = "cm",
        dpi = 300,
-       type = "cairo",
        device = png_device)
 ggsave(paramplot,
        file = "figures/S5_TC_model_params_posterior_distribution.pdf",
