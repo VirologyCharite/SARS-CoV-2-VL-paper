@@ -1192,7 +1192,7 @@ tbl_NHST =
 tbl_NHST
 ```
 
-## Association of viral load probability of a positive culture
+## Association of viral load and probability of a positive culture
 
 To estimate the association between viral load and culture probability, we estimate a logistic regression in brms. Based on the preliminary analysis described above, this analysis uses only the data from from [@Wolfel2020-fu] and [@Perera2020-nc].
 
