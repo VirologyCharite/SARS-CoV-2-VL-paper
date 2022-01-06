@@ -1110,7 +1110,7 @@ ppc_2d(bfitdata,yhat, "Group") + ggtitle("Posterior prediction by sub-sample")
 
 ```{r ppcCenter, fig.cap =  "Observed (red dots) and estimated means and variances of viral load by test centre group"}
 ppc_2d(bfitdata,yhat, "TestCentreCategory") + ggtitle("Posterior prediction by TestCentreCategory group")
-rm(fits,yhat)
+rm(yhat)
 tmp = gc(verbose = F)
 ```
 
