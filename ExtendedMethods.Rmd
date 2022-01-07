@@ -15,7 +15,7 @@ bibliography: refs.bib
 
 ```{r setup, include=FALSE}
 show_code = T
-knitr::opts_chunk$set(echo = TRUE,warning=F, message=F, fig.width=9, fig.align= 'center',root.dir = here::here(), echo = show_code)
+knitr::opts_chunk$set(warning=F, message=F, fig.width=9, fig.align= 'center',root.dir = here::here(), echo = show_code)
 library(data.table)
 setDTthreads(1)
 library(here)
