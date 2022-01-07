@@ -1091,7 +1091,7 @@ calc_post_lin_pred = function(bfit, CPpars, ndt, wghts , sum.Group = "Group", ep
     clust <- makeCluster(n_clust)
     clusterExport(clust,varlist = "worker_setup")
     clusterEvalQ(clust,worker_setup())
-    clusterExport(clust,varlist = c("add_mix","post_lin_pred","AgeYearLoadData","make_pp","start_idx","algo"), envir = environment())
+    clusterExport(clust,varlist = c("mix_all", "add_mix","post_lin_pred","AgeYearLoadData","make_pp","start_idx","algo"), envir = environment())
     a <- parLapply(clust, sapply(1:max(post_lin_pred$.draw), list), make_pp)
     stopCluster(clust)
     pp = do.call(rbind,lapply(a, function(x) cbind(x[[1]],x[[2]])))
