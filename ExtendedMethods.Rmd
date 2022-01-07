@@ -69,11 +69,6 @@ if (testing == T) {
 HOSPITAL_TEST_CENTRE = c('H', 'ICU', 'IDW', 'WD')
 PAMS_CENTRE = c("AIR", "C19", "SM")
 
-if (Sys.info()["sysname"] == "Darwin") {
-  png_device = NULL
-} else {
-  png_device = "cairo"
-}
 ```
 
 `r ifelse(show_code == T, "The analysis pipeline makes heavy use of custom functions which can be found the the R-script utils.R.
@@ -1765,7 +1760,7 @@ ppc_timecourse
 ggsave(ppc_timecourse,
        file = "figures/S16_ppc_timecourse.png",
        width = 30, height = 40,units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(ppc_timecourse,
        file = "figures/S16_ppc_timecourse.pdf",
        width = 30, height = 40,units = "cm")
@@ -1809,11 +1804,11 @@ ppc_timecourse =
 ggsave(ppc_timecourse,
        file = "figures/S17_ppc_difficult.png",
        width = 30, height = 30,units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(ppc_timecourse,
        file = "figures/S17_ppc_difficult.png",
        width = 30, height = 30,units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ppc_timecourse
 
 ```
@@ -3279,7 +3274,7 @@ ggsave(paramplot,
        width = 30,
        units = "cm",
        dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(paramplot,
        file = "figures/S5_TC_model_params_posterior_distribution.pdf",
        height = 15,
@@ -3482,8 +3477,7 @@ rm(model_pars_by_sub_sample)
        width = 30,
        height = 20,
        units = "cm",
-       type = "cairo",
-       device = png_device)
+       type = "cairo")
 ggsave(file = "figures/S11_TC_model_params_by_subsample_group.pdf",
        width = 30,
        height = 20,
@@ -5056,7 +5050,7 @@ F2 =
 
 ggsave(F2,filename = "figures/F2.png",
        width = 30, height = 24, units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(F2,filename = "figures/F2.pdf",
        width = 30, height = 24, units = "cm")
 #save(F2,file = "figures/F2.Rdata")
@@ -5173,7 +5167,7 @@ F4 =
 
 ggsave(F4,filename = "figures/F4.png",
        width = 30, height = 10, units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(F4,filename = "figures/F4.pdf",
        width = 30, height = 10, units = "cm")
 F4
