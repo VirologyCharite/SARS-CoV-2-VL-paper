@@ -1112,8 +1112,8 @@ calc_post_lin_pred = function(bfit, CPpars, ndt, wghts , sum.Group = "Group", ep
               post_lin_pred[log10Load < -1, .(N = .N), by = .(Group, .draw)]) %>%
         .[, .(Group,.draw)] %>%
         unique()
-      for (k in 1:nrow(badfits)) {
       has_bad_fits = ifelse(nrow(badfits) > 0,T,F)
+      for (k in seq_len(nrow(badfits))) {
         post_lin_pred[Group == badfits$Group[k] & .draw == badfits$.draw[k], p9 := NA]
         post_lin_pred[Group == badfits$Group[k] & .draw == badfits$.draw[k], e.log10Load := NA]
       }
