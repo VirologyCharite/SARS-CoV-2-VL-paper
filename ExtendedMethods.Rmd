@@ -1647,7 +1647,7 @@ To check that the model adequately describes the data, we plot observed data tog
 ```{r ppcTimeModel, fig.height=9, fig.width=9, fig.cap = "Posterior predictive check for the estimated 2-slopes time course. Blue lines are expected viral load time courses, i.e., the average over all time courses calulated from the posterior distribution of a subject's parameters. The shaded blue region indicates the 90% credible interval of the expection. x are observed measurements. Red points are observed measurements after shifting them for alignment in time and imputation of viral loads for negative tests."}
 
 if (file.exists("pdata/VLCP_by_day_draws.Rdata")) {
-  load("pdata/VLCP_by_day_draws_b.Rdata")
+  load("pdata/VLCP_by_day_draws.Rdata")
 } else {
   VLCP_by_day_draws = 
     make_VLCP_by_draw_ID(draws,
