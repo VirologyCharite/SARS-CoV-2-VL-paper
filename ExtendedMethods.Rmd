@@ -2346,8 +2346,6 @@ global_CP =
   post_lin_pred %>% 
   .[global_weights, w_CP := CP * w_age] %>%
   .[, .(CP = sum(w_CP)), by = .(.draw,Group)]
-
-post_lin_pred[, w_CP := NULL]
 ```
 
 
