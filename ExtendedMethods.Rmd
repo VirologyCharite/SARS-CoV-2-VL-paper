@@ -2120,7 +2120,7 @@ all_weights_Age_TestCentre =
 
 all_weights_Age_TestCentre %>% 
   copy() %>% 
-  .[N == 0, weight := NA] %>% 
+  .[N > 0] %>%
   ggplot(aes(y = TestCentre.Group, x = weight, group = Age, color = Age)) + 
   geom_point() + 
   theme(legend.position= "top")
