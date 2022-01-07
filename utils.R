@@ -1725,7 +1725,7 @@ ppc_2d = function(fulldt, yhat, strat_var){
     c1 <- cumsum(sz) * dx * dy
     
     dimnames(mv.kde$z) <- list(mv.kde$x,mv.kde$y)
-    tmp <- reshape::melt(mv.kde$z)
+    tmp <- suppressWarnings(reshape::melt(mv.kde$z))
     names(tmp)[1:2] = c("mean","sd")
     idx = k*n^2+(1:n^2)
     dc[idx, mean := tmp$mean]
