@@ -2383,7 +2383,7 @@ p_load_by_age =
   coord_cartesian(ylim = c(2,10)) +
   scale_x_continuous(expand = expansion(0,0)) +
   ylab(expression(Mean~log[10]~viral~load)) +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_load_by_age
 p_load_by_age = 
@@ -2392,7 +2392,7 @@ p_load_by_age =
   gg_legend_size(1) +
   gg_expand() + 
   gg_text_size() +
-  guides(color = FALSE) 
+  guides(color = "none")
 ```
 
 Because we are primarily interested in differences between sub _groups_ of the population, we calculate credible intervals based on the expected viral load (and culture probability). This could however give a false impression about the accuracy of viral load predictions on the subject-level, which should take the error variance into account. 
@@ -2414,7 +2414,7 @@ p_CP_by_age =
   coord_cartesian(ylim = c(0,1)) +
   scale_x_continuous(expand = expansion(0,0)) +
   ylab("Culture probability") +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_CP_by_age.e =
   ggplot(stats_by_age.e[outcome == "e.CP" & sample != "All"],
@@ -2427,7 +2427,7 @@ p_CP_by_age.e =
   coord_cartesian(ylim = c(0,1)) +
   scale_x_continuous(expand = expansion(0,0)) +
   ylab("Culture probability") +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_CP_by_age = 
   p_CP_by_age + 
@@ -2435,7 +2435,7 @@ p_CP_by_age =
   gg_legend_size(1) +
   gg_expand() + 
   gg_text_size() +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_CP_by_age.e = 
   p_CP_by_age.e + 
@@ -2443,7 +2443,7 @@ p_CP_by_age.e =
   gg_legend_size(1) +
   gg_expand() + 
   gg_text_size() +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_CP_by_age.e + p_CP_by_age + facet_grid(sample~.) + theme(legend.position = "none")
 ```
