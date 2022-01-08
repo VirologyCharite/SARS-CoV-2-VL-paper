@@ -458,7 +458,7 @@ est_TC_PHG_by_Age = function() {
   
   my_data = data.table(
     Age = datalist$Age,
-    PAMS1 = datalist$X_PGH[,"PAMS1TRUE"],
+    PAMS1 = datalist$X_PGH[,"PAMS1"],
     Gender = datalist$X_PGH[,"Gender"],
     Hospitalized = datalist$X_PGH[,"Hospitalized"]
   ) 
