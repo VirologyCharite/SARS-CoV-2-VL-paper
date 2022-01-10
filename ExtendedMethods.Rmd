@@ -69,6 +69,11 @@ if (testing == T) {
 HOSPITAL_TEST_CENTRE = c('H', 'ICU', 'IDW', 'WD')
 PAMS_CENTRE = c("AIR", "C19", "SM")
 
+## create dirs to be used later
+dir.create("figures", showWarnings = FALSE)
+dir.create("pdata", showWarnings = FALSE)
+dir.create("B117fits", showWarnings = FALSE)
+dir.create("CP/fits/w25o", recursive = TRUE, showWarnings = FALSE)
 ```
 
 `r ifelse(show_code == T, "The analysis pipeline makes heavy use of custom functions which can be found the the R-script utils.R.
