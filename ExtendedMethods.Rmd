@@ -3849,8 +3849,7 @@ if (file.exists("pdata/DetectionTiming.Rdata")) {
   shift_ttp = 
     draws_by_id(draws,c("shift","slope_up","intercept","time2peak"))
   setkeyv(day_data,"ID")
-  setkeyv(positive_before_peak_load_by_ID_draw,"ID")
-  positive_before_peak_load_by_ID_draw = 
+  positive_before_peak_load_by_ID_draw =
   merge(shift_ttp,
         day_data[day == 0,
                  .(ID,first_test_negative,day_first_positive,N_tests,Age,PAMS1,Group)],
@@ -3863,6 +3862,7 @@ if (file.exists("pdata/DetectionTiming.Rdata")) {
   .[, p_pos_test_before_peak := ((day_first_positive + shift) < 0) ] %>%
   .[, pos_test_before_peak := day_first_positive_shifted < 0] %>%
   .[, pos_test_before_peak_b := ifelse(p_pos_test_before_peak > runif(1),T,F), by = .(ID,.draw)]
+  setkeyv(positive_before_peak_load_by_ID_draw,"ID")
   
 day_first_post_test_by_draw = 
   positive_before_peak_load_by_ID_draw %>%
