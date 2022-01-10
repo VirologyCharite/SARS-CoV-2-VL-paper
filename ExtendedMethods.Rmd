@@ -3533,7 +3533,7 @@ tmp =
   as_draws_dt() %>% 
   melt(id.var = ".draw", value.name = "int_centre1_raw") %>% 
   .[, centr1 := factor(as.numeric(factor(variable)),
-                          labels = names(table(day_data[day == 0,centreCategory])))] %>% 
+                          labels = names(table(day_data[day == 0,testCentreCategory])))] %>%
   merge(draws %>%
           subset_draws("int_centre1_sigma") %>%
           as_draws_dt(), by = ".draw") %>% 
