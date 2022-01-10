@@ -5218,9 +5218,11 @@ rm(F5 ,VL_TC, CP_TC)
 `r ifelse(show_code == T,"# Stan model for time course estimation","")`
 
 ```{r show_group_model, echo=FALSE, results="asis"}
-if (show_code == T) {
+## check pygmentize exists (assumed in "anaconda" dir)
+pygmentize_bin = paste0(Sys.getenv("HOME"), "/anaconda/bin/pygmentize")
+if (show_code == T && file.exists(pygmentize_bin)) {
   tf <- tempfile(fileext=".html")
-  cmd = paste0("/Users/guidobiele/anaconda/bin/pygmentize -o %s CP/stan/",model,".stan")
+  cmd = paste0(pygmentize_bin, " -o %s CP/stan/",model,".stan")
   system(sprintf(cmd, tf))
   cat(readLines(tf), sep="\n")
   unlink(tf)
