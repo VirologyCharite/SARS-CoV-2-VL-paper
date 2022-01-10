@@ -4692,19 +4692,19 @@ if (file.exists("pdata/peak_load_by_age_draws.Rdata")) {
 
 
 
-comp = peak_load_by_age_draws[Age > 44 & Age < 55 , .(m = mean(VL)), by = .(adjusted,.draw)]
-setkeyv(comp,c(".draw","adjusted"))
-setkeyv(peak_load_by_age_draws,c(".draw","adjusted"))
+comp = peak_load_by_age_draws[Age > 44 & Age < 55 , .(m = mean(VL)), by = .(Adjusted,.draw)]
+setkeyv(comp,c(".draw","Adjusted"))
+setkeyv(peak_load_by_age_draws,c(".draw","Adjusted"))
 pdata = 
   peak_load_by_age_draws %>% 
   .[comp, delta := VL - m] %>% 
-  get_stats(var = "delta",by = c("Age","adjusted")) %>% 
-  .[,Adjustment := ifelse(adjusted == T,"Yes","No")]
+  get_stats(var = "delta",by = c("Age","Adjusted")) %>%
+  .[,Adjustment := ifelse(Adjusted == T,"Yes","No")]
 delta_grand_mean = 
-  peak_load_by_age_draws[,.(m = mean(VL)), by = .(adjusted)] %>% 
-  merge(comp[,.(m = mean(m)), by = .(adjusted)], by = "adjusted") %>% 
+  peak_load_by_age_draws[,.(m = mean(VL)), by = .(Adjusted)] %>%
+  merge(comp[,.(m = mean(m)), by = .(Adjusted)], by = "Adjusted") %>%
   .[, delta := m.x - m.y] %>% 
-  .[,Adjustment := ifelse(adjusted == T,"Yes","No")]
+  .[,Adjustment := ifelse(Adjusted == T,"Yes","No")]
 p_deltaVL_peak = 
   pdata %>% 
   ggplot(aes(x = Age, y = mean, color = Adjustment, fill = Adjustment, group = Adjustment)) +
@@ -4721,18 +4721,18 @@ p_deltaVL_peak =
   gg_expand() + 
   gg_add_grid()
 
-comp = peak_load_by_age_draws[Age > 44 & Age < 55 , .(m = mean(CP)), by = .(adjusted,.draw)]
-setkeyv(comp,c(".draw","adjusted"))
+comp = peak_load_by_age_draws[Age > 44 & Age < 55 , .(m = mean(CP)), by = .(Adjusted,.draw)]
+setkeyv(comp,c(".draw","Adjusted"))
 pdata = 
   peak_load_by_age_draws %>% 
   .[comp, delta := CP - m] %>% 
-  get_stats(var = "delta",by = c("Age","adjusted")) %>% 
-  .[,Adjustment := ifelse(adjusted == T,"Yes","No")]
+  get_stats(var = "delta",by = c("Age","Adjusted")) %>%
+  .[,Adjustment := ifelse(Adjusted == T,"Yes","No")]
 delta_grand_mean = 
-  peak_load_by_age_draws[,.(m = mean(CP)), by = .(adjusted)] %>% 
-  merge(comp[,.(m = mean(m)), by = .(adjusted)], by = "adjusted") %>% 
+  peak_load_by_age_draws[,.(m = mean(CP)), by = .(Adjusted)] %>%
+  merge(comp[,.(m = mean(m)), by = .(Adjusted)], by = "Adjusted") %>%
   .[, delta := m.x - m.y] %>% 
-  .[,Adjustment := ifelse(adjusted == T,"Yes","No")]
+  .[,Adjustment := ifelse(Adjusted == T,"Yes","No")]
 p_deltaCP_peak = 
   pdata %>% 
   ggplot(aes(x = Age, y = mean, color = Adjustment, fill = Adjustment, group = Adjustment)) +
@@ -4755,7 +4755,7 @@ p_deltaVL_peak | p_deltaCP_peak
 
 ```{r TBLpeakVLCPdiff}
 comps = setdiff(levels(peak_load_by_age_group_draws$Age_group),"45-55")
-setkeyv(peak_load_by_age_group_draws, c(".draw","adjusted","Age_group"))
+setkeyv(peak_load_by_age_group_draws, c(".draw","Adjusted","Age_group"))
 
 peak_VLCP_diffs_tbl = 
   do.call(rbind,
@@ -4765,13 +4765,13 @@ peak_VLCP_diffs_tbl =
                  .[Age_group %in% c("45-55",comp)] %>% 
                  .[, .(deltaCP = diff(CP)*ifelse(comp %in% comps[1:5],-1,1), 
                        deltaVL = diff(VL)*ifelse(comp %in% comps[1:5],-1,1)), 
-                   by = .(adjusted,.draw)] %>% 
-                 .[, .(VL = sprint_stat(deltaVL),CP = sprint_stat(deltaCP,2)), by = .(adjusted)] %>% 
+                   by = .(Adjusted,.draw)] %>%
+                 .[, .(VL = sprint_stat(deltaVL),CP = sprint_stat(deltaCP,2)), by = .(Adjusted)] %>%
                  .[, `Age group` := comp])
 ) %>% 
-  .[, .(`Age group`,adjusted,VL,CP)] %>% 
+  .[, .(`Age group`,Adjusted,VL,CP)] %>%
   .[, `Age group` := factor(`Age group`,levels = levels(peak_load_by_age_group_draws$Age_group))] %>% 
-  setkeyv(c("adjusted","Age group"))
+  setkeyv(c("Adjusted","Age group"))
 
 
 tbl_peak_VLCP_diffs_tbl = 
