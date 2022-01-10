@@ -5236,7 +5236,7 @@ if (show_code == T && file.exists(pygmentize_bin)) {
 library(pander)
 library(sessioninfo)
 my_sessioninfo <- session_info()
-pander(my_sessioninfo)
+suppressWarnings(pander(my_sessioninfo))
 ```
 
 # References
