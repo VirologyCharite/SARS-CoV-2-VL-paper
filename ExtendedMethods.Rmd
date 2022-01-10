@@ -5183,7 +5183,6 @@ tmp = gc(verbose = F)
 ## Figure 5: Peak viral load and culture probability by age
 
 ```{r makeFigure5, fig.cap="Estimated expected viral load and culture probability for age groups by time. A) Change in estimated viral load over time according to age group for 4344 subjects with at least three RT-PCR tests, at least two of which were positive. The age colouring, range, and number of subjects in each category is given in the figure legend. Shading indicates the 90% credible interval of the mean. B) Change in estimated culture probability over time according to age. Age groups, colouring, and shading are as in A. C) Estimated age group differences in mean peak viral load, corresponding to the values at day zero in A. D) Estimated age group differences in mean peak culture probability, corresponding to the values at day zero in B. In C and D, adjusted differences account for variations by age in clinical status and gender. Dotted lines indicate grand means for the 4344 subjects.", fig.width=20/2.54, fig.height=20/2.54}
-VLCP_by_day_draws[, Age_group := NULL]
 grp.dt = unique(day_data[,.(ID,Age_group)])
 
 VL_TC = 
@@ -5213,7 +5212,7 @@ ggsave("figures/F5.pdf",F5, width = 20,
        height = 20, units = "cm")
 #save(F5,file = "figures/F5.Rdata")
 F5 
-rm(F5 ,VL_TC, CP_TC,VL_delta, CP_delta)
+rm(F5 ,VL_TC, CP_TC)
 ```
 
 `r ifelse(show_code == T,"# Stan model for time course estimation","")`
