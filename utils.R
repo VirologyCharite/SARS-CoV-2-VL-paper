@@ -404,8 +404,8 @@ make_time_course_standata = function(selection = 3,
   #### CP data ###
   cp_data = 
     get_CP_data() %>% 
-    .[!is.na(culture_positive) & Study %in% c("woelfel","ranawaka") & log10Load > 2] 
-  
+    .[!is.na(culture_positive) & Study %in% c("Perera (2021)","Woelfel (2020)") & log10Load > 2]
+
   datalist_CP = list(
     N_CP = nrow(cp_data),
     Y_CP = cp_data$culture_positive,
