@@ -4362,7 +4362,7 @@ if (file.exists("pdata/TC_by_age_grp2.Rdata")) {
 } else {
   TC_by_age_grp2 = 
   plot_by_day_grp_delta(VLCP_by_day_draws,
-                      grp.dt = unique(day_data[,.(ID,Age_group)]),
+                      grp.dt = unique(day_data[!is.na(Age_group),.(ID,Age_group)]),
                       comparisons = my_comparisons)
   TC_by_age_grp2_peak_VLCB_tbl = 
   merge(
@@ -4550,7 +4550,7 @@ p_Group_Age1 =
   theme(axis.title.x = element_blank())
 
 p_Age_Group2 = 
-  by_day_grp %>% 
+  by_day_grp[!is.na(Age)] %>%
   ggplot(aes(x = day_shifted, y = mean, color = Age)) + 
   geom_line() + 
   conf_ribbon(by_day_grp, fill = "Age") + 
