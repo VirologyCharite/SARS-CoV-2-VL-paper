@@ -1991,7 +1991,7 @@ plot_key_days_by_age = function(by_dayIDdraw, target.var = "value", var, grp.var
     setnames("mean",var)
   
   plot_by_Age = 
-    ggplot(by_dayAgeGrp, aes_string(x = "days_after_peak_load", y = var, color = grp.var, group = grp.var)) + 
+    ggplot(by_dayAgeGrp[!is.na(get(grp.var))], aes_string(x = "days_after_peak_load", y = var, color = grp.var, group = grp.var)) +
     geom_point(position = position_dodge(width = dodge_with), size = .5) + 
     conf_linerange(by_dayAgeGrp, color =  grp.var) + 
     xlab("Days from peak viral load") +
