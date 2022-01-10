@@ -4654,7 +4654,8 @@ if (file.exists("pdata/peak_load_by_age_draws.Rdata")) {
   CPpars = draws %>% 
     subset_draws(c("alpha_CP","beta_CP")) %>% 
     as_draws_dt() %>% 
-    setkeyv(".draw") 
+    setkeyv(".draw")
+  est_TC_PHG_by_Age()
   peak_load_by_age_draws_full = 
     do.call(rbind,
             lapply(c(T,F), 
