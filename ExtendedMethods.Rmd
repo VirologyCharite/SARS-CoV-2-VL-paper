@@ -656,7 +656,7 @@ sigma_difference =
   apply(1,diff) %>% 
   sprint_stat(2)
 
-CPdataTBL
+CPdata_table
 ```
 
 Application of the Inter-ocular trauma test to the culturing data does not indicate that the distribution of pre-culturing viral loads are different (or identical) for positive B.1.1.7 and B.1.177 cultures. (A Bayesian regression model confirms inconclusive results for the difference of means `r mean_difference` and for the difference of standard deviations `r sigma_difference`).
