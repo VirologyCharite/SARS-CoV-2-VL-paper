@@ -2869,7 +2869,6 @@ p_age_comp_CP =
 
 
 p_age_comp_VL
-rm(post_lin_pred_all)
 ```
 
 To collect all age comparisons in one place and thus facilitate comparisons, we compose a table with estimated age differences for viral load and culture probability and unadjusted age differences calculated directly from the raw data. This is table 2 of the paper.
