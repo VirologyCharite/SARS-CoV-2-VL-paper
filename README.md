@@ -135,6 +135,16 @@ The R Markdown has been processed into HTML (in
 [here](http://htmlpreview.github.io/?https://github.com/VirologyCharite/SARS-CoV-2-VL-paper/blob/main/ExtendedMethods.html)
 to view the file in your browser.
 
+To re-run the analyses and re-generate the HTML file in R first install all package dependencies using the `remotes` packages
+```r
+remotes::install_deps()
+```
+and then process the markdown file using
+```r
+rmarkdown::render("ExtendedMethods.Rmd")
+```
+Depending on the computing power available on the machine where this is run this can take from a few hours to days.
+
 ## utils.R
 
 Contains various [R](https://www.r-project.org/) utility functions.
