@@ -404,8 +404,8 @@ make_time_course_standata = function(selection = 3,
   #### CP data ###
   cp_data = 
     get_CP_data() %>% 
-    .[!is.na(culture_positive) & Study %in% c("woelfel","ranawaka") & log10Load > 2] 
-  
+    .[!is.na(culture_positive) & Study %in% c("Perera (2021)","Woelfel (2020)") & log10Load > 2]
+
   datalist_CP = list(
     N_CP = nrow(cp_data),
     Y_CP = cp_data$culture_positive,
@@ -458,7 +458,7 @@ est_TC_PHG_by_Age = function() {
   
   my_data = data.table(
     Age = datalist$Age,
-    PAMS1 = datalist$X_PGH[,"PAMS1TRUE"],
+    PAMS1 = datalist$X_PGH[,"PAMS1"],
     Gender = datalist$X_PGH[,"Gender"],
     Hospitalized = datalist$X_PGH[,"Hospitalized"]
   ) 
@@ -1091,7 +1091,7 @@ calc_post_lin_pred = function(bfit, CPpars, ndt, wghts , sum.Group = "Group", ep
     clust <- makeCluster(n_clust)
     clusterExport(clust,varlist = "worker_setup")
     clusterEvalQ(clust,worker_setup())
-    clusterExport(clust,varlist = c("add_mix","post_lin_pred","AgeYearLoadData","make_pp","start_idx","algo"), envir = environment())
+    clusterExport(clust,varlist = c("mix_all", "add_mix","post_lin_pred","AgeYearLoadData","make_pp","start_idx","algo"), envir = environment())
     a <- parLapply(clust, sapply(1:max(post_lin_pred$.draw), list), make_pp)
     stopCluster(clust)
     pp = do.call(rbind,lapply(a, function(x) cbind(x[[1]],x[[2]])))
@@ -1112,8 +1112,8 @@ calc_post_lin_pred = function(bfit, CPpars, ndt, wghts , sum.Group = "Group", ep
               post_lin_pred[log10Load < -1, .(N = .N), by = .(Group, .draw)]) %>%
         .[, .(Group,.draw)] %>%
         unique()
-      has_bad_fits = ifelse(nrow(badfits > 0),T,F)
-      for (k in 1:nrow(badfits)) {
+      has_bad_fits = ifelse(nrow(badfits) > 0,T,F)
+      for (k in seq_len(nrow(badfits))) {
         post_lin_pred[Group == badfits$Group[k] & .draw == badfits$.draw[k], p9 := NA]
         post_lin_pred[Group == badfits$Group[k] & .draw == badfits$.draw[k], e.log10Load := NA]
       }
@@ -1725,7 +1725,7 @@ ppc_2d = function(fulldt, yhat, strat_var){
     c1 <- cumsum(sz) * dx * dy
     
     dimnames(mv.kde$z) <- list(mv.kde$x,mv.kde$y)
-    tmp <- reshape::melt(mv.kde$z)
+    tmp <- suppressWarnings(reshape::melt(mv.kde$z))
     names(tmp)[1:2] = c("mean","sd")
     idx = k*n^2+(1:n^2)
     dc[idx, mean := tmp$mean]
@@ -1991,7 +1991,7 @@ plot_key_days_by_age = function(by_dayIDdraw, target.var = "value", var, grp.var
     setnames("mean",var)
   
   plot_by_Age = 
-    ggplot(by_dayAgeGrp, aes_string(x = "days_after_peak_load", y = var, color = grp.var, group = grp.var)) + 
+    ggplot(by_dayAgeGrp[!is.na(get(grp.var))], aes_string(x = "days_after_peak_load", y = var, color = grp.var, group = grp.var)) +
     geom_point(position = position_dodge(width = dodge_with), size = .5) + 
     conf_linerange(by_dayAgeGrp, color =  grp.var) + 
     xlab("Days from peak viral load") +

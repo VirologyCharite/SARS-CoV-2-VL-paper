@@ -15,7 +15,7 @@ bibliography: refs.bib
 
 ```{r setup, include=FALSE}
 show_code = T
-knitr::opts_chunk$set(echo = TRUE,warning=F, message=F, fig.width=9, fig.align= 'center',root.dir = here::here(), echo = show_code)
+knitr::opts_chunk$set(warning=F, message=F, fig.width=9, fig.align= 'center',root.dir = here::here(), echo = show_code)
 library(data.table)
 setDTthreads(1)
 library(here)
@@ -69,11 +69,11 @@ if (testing == T) {
 HOSPITAL_TEST_CENTRE = c('H', 'ICU', 'IDW', 'WD')
 PAMS_CENTRE = c("AIR", "C19", "SM")
 
-if (Sys.info()["sysname"] == "Darwin") {
-  png_device = NULL
-} else {
-  png_device = "cairo"
-}
+## create dirs to be used later
+dir.create("figures", showWarnings = FALSE)
+dir.create("pdata", showWarnings = FALSE)
+dir.create("B117fits", showWarnings = FALSE)
+dir.create("CP/fits/w25o", recursive = TRUE, showWarnings = FALSE)
 ```
 
 `r ifelse(show_code == T, "The analysis pipeline makes heavy use of custom functions which can be found the the R-script utils.R.
@@ -211,7 +211,8 @@ time_course_table =
   .[day == 0, 
     list(`N time` = .N),
     by = .(`Age category`)] %>% 
-  .[order(`Age category`)]
+  .[order(`Age category`)] %>%
+  .[!is.na(`Age category`)]
 
 dt[, positive := ifelse(is.na(log10Load),F,T)]
 
@@ -660,7 +661,7 @@ sigma_difference =
   apply(1,diff) %>% 
   sprint_stat(2)
 
-CPdataTBL
+CPdata_table
 ```
 
 Application of the Inter-ocular trauma test to the culturing data does not indicate that the distribution of pre-culturing viral loads are different (or identical) for positive B.1.1.7 and B.1.177 cultures. (A Bayesian regression model confirms inconclusive results for the difference of means `r mean_difference` and for the difference of standard deviations `r sigma_difference`).
@@ -796,7 +797,6 @@ ggplot(culture_data, aes(x = log10Load, fill = Study, color = culture_positive))
   facet_wrap(~Study, nrow = 1, scale = "free_y") + 
   theme(legend.position = "top") + 
   theme(legend.position = "none")
-rm(merged_data)
 ```
 
 We estimated a Bayesian hierarchical logistic regressions in rstanarm [@rstanarm1] for the three datasets to investigate if the association between viral load and positive culture outcome is sufficiently similar to pool the data from these studies:
@@ -877,61 +877,64 @@ wherein
 
 The following code describes the model estimation, including specification of weakly informative priors. The analysis uses default values of 1000 warm-up samples, 1000 post warm-up samples, and 4 independent chains.
 
-```{r estimate_model, eval = F}
-# get data
-bdata = 
-  get_log10Load_data() %>%
-  .[, PCR_Gender_Group := factor(paste0(PCR,"_",Gender,"_",Group))] %>%
-  .[, PCR_Group := factor(paste0(PCR,"_",Group))] %>%
-  .[, fAgeGroup := factor(AgeGroup, ordered = F)] %>% 
-  .bdata[, Male := ifelse(Gender == "M",1,ifelse(Gender == "F",0,.5))]
-
-
-model_formula = 
-  bf(log10Load ~ B117 + PCR + Male + Group + s(Age, by = Group) + (1 | TestCentreCategory/Hospitalized) ,
-     family = student(),
-     sigma ~ PCR + (1 | fAgeGroup) + (1 | TestCentreCategory)) 
-
-# Specify weakly informative priors
-prior = 
-  c(prior(normal(6, 3), class = Intercept),
-    prior(normal(0, 2), class = b),
-    prior(normal(0, 2), class = sd),
-    prior(normal(0, 1), class = b, dpar = "sigma"),
-    prior(normal(0, 1), class = Intercept, dpar = "sigma"),
-    prior(normal(0, 1), class = sd, dpar = "sigma"),
-    prior(normal(0, 1), class = sds)
-  )
-
-# make output-skeleton to get parameter dimensions 
-# in a convenient format to be used to set initial 
-# parameter values
-bfit = brm(model_formula,
-           data = bdata,
-           chains = 1,
-           iter = 10,
-           prior = prior,
-           backend = "cmdstanr")
-
-############ fit modified model ###########
-my_inits = lapply(1:4,function(x) make_age_fit_inits(bfit))
-bfit = brm(model_formula,
-           data = bdata,
-           chains = 4,
-           iter = 2000,
-           prior = prior,
-           inits = my_inits,
-           backend = "cmdstanr")
-
-sampler_params = 
-  nuts_params(bfit) %>% 
-  data.table() %>% 
-  dcast(Chain + Iteration ~ Parameter, value.var = "Value")
-
+```{r estimate_model, eval = T}
 fn = here("FPT/splines_TP+.Rdata")
-save(bfit,sampler_params,file = fn)
-draws = as_draws(bfit$fit)
-save(bfit,draws,sampler_params,file = fn)
+if (file.exists(fn)) {
+  load(fn)
+} else {
+  # get data
+  bdata = 
+    get_log10Load_data() %>%
+    .[, PCR_Gender_Group := factor(paste0(PCR,"_",Gender,"_",Group))] %>%
+    .[, PCR_Group := factor(paste0(PCR,"_",Group))] %>%
+    .[, fAgeGroup := factor(AgeGroup, ordered = F)] %>% 
+    .[, Male := ifelse(Gender == "M",1,ifelse(Gender == "F",0,.5))]
+
+
+  model_formula = 
+    bf(log10Load ~ B117 + PCR + Male + Group + s(Age, by = Group) + (1 | TestCentreCategory/Hospitalized) ,
+       family = student(),
+       sigma ~ PCR + (1 | fAgeGroup) + (1 | TestCentreCategory)) 
+
+  # Specify weakly informative priors
+  prior = 
+    c(prior(normal(6, 3), class = Intercept),
+      prior(normal(0, 2), class = b),
+      prior(normal(0, 2), class = sd),
+      prior(normal(0, 1), class = b, dpar = "sigma"),
+      prior(normal(0, 1), class = Intercept, dpar = "sigma"),
+      prior(normal(0, 1), class = sd, dpar = "sigma"),
+      prior(normal(0, 1), class = sds)
+    )
+
+  # make output-skeleton to get parameter dimensions 
+  # in a convenient format to be used to set initial 
+  # parameter values
+  bfit = brm(model_formula,
+             data = bdata,
+             chains = 1,
+             iter = 10,
+             prior = prior,
+             backend = "cmdstanr")
+
+  ############ fit modified model ###########
+  my_inits = lapply(1:4,function(x) make_age_fit_inits(bfit))
+  bfit = brm(model_formula,
+             data = bdata,
+             chains = 4,
+             iter = 2000,
+             prior = prior,
+             inits = my_inits,
+             backend = "cmdstanr")
+
+  sampler_params = 
+    nuts_params(bfit) %>% 
+    data.table() %>% 
+    dcast(Chain + Iteration ~ Parameter, value.var = "Value")
+
+  draws = as_draws(bfit$fit)
+  save(bfit,draws,sampler_params,file = fn)
+}
 ```
 
 ### Check successful estimation
@@ -939,7 +942,6 @@ save(bfit,draws,sampler_params,file = fn)
 To verify a successful model estimation, we check R-hat [@Vehtari2020-fj] and the number of divergent iterations [@Betancourt2016-gt].
 
 ```{r AgeModelChecks, fig.cap= "R-hat values for viral load and age models", eval = T}
-load(here("FPT/splines_TP+.Rdata"))
 bfitdata = 
   data.table(bfit$data) %>% 
   .[, Age_rounded := round(Age)] %>% 
@@ -1059,7 +1061,9 @@ obs_by_age =
            upper = mean(log10Load) + 1.96 * sd(log10Load)/sqrt(.N),
            N = .N),
     by = .(Age_rounded,Group)] %>% 
-  .[, `Test result` := factor("observed",levels = c("observed","modeled"))]
+  .[, `Test result` := factor("observed",levels = c("observed","modeled"))] %>%
+  .[, lower := ifelse(is.na(lower), log10Load, lower)] %>%
+  .[, upper := ifelse(is.na(upper), log10Load, upper)]
 
 obs_by_age_all = 
   bfitdata[Age_rounded < 26] %>% 
@@ -1108,7 +1112,7 @@ ppc_2d(bfitdata,yhat, "Group") + ggtitle("Posterior prediction by sub-sample")
 
 ```{r ppcCenter, fig.cap =  "Observed (red dots) and estimated means and variances of viral load by test centre group"}
 ppc_2d(bfitdata,yhat, "TestCentreCategory") + ggtitle("Posterior prediction by TestCentreCategory group")
-rm(fits,yhat)
+rm(yhat)
 tmp = gc(verbose = F)
 ```
 
@@ -1190,7 +1194,7 @@ tbl_NHST =
 tbl_NHST
 ```
 
-## Association of viral load probability of a positive culture
+## Association of viral load and probability of a positive culture
 
 To estimate the association between viral load and culture probability, we estimate a logistic regression in brms. Based on the preliminary analysis described above, this analysis uses only the data from from [@Wolfel2020-fu] and [@Perera2020-nc].
 
@@ -1510,50 +1514,54 @@ lines(prior_sample_densities[["time2peak"]])
 
 ### Model estimation
 
-`r ifelse(show_code == T,"Data for the Stan model are generated in a custom function (see utils.R).","")` To estimate model parameters, we used 4 independent chains, each with 1000 warm-up and 1000 post warm-up samples. Prior analysis showed that 4000 post-warm-up samples produced sufficient effective samples to reliably estimate 90% credible intervals for parameters of interest. Here, we only show the code for the analysis of the full date set (which takes around 6 hours with 4 parallel chains on an Amazon EC2 c5d.2xlarge instance).
+`r ifelse(show_code == T,"Data for the Stan model are generated in a custom function (see utils.R).","")` To estimate model parameters, we used 4 independent chains, each with 1000 warm-up and 1000 post warm-up samples. Prior analysis showed that 4000 post-warm-up samples produced sufficient effective samples to reliably estimate 90% credible intervals for parameters of interest. Analysis of the full date set takes around 6 hours with 4 parallel chains on an Amazon EC2 c5d.2xlarge instance.
 
-```{r estimate_time_model, eval = F}
-# minimum number of data points per subjects
-my_selections = 3:9
+```{r estimate_time_model, eval = T}
+fn = here(paste0("CP/fits/w25o/",model,"_sel3.Rdata"))
 
-# run analyses for subjects with different
-# minimum number of data points per subjects
-for (selection in my_selections) {
-  make_time_course_standata(
-    selection = selection,      # minimum number of data points per participants
-    max_diff_load_12perday = 5, # maximum allowed per day viral load increases 
-    imputation_limit = 3) %>%   # maximum value of imputed viral load for negative tests
-    list2env(.GlobalEnv)
+if (!file.exists(fn)) {
+  # minimum number of data points per subjects
+  my_selections = 3:9
+
+  # run analyses for subjects with different
+  # minimum number of data points per subjects
+  for (selection in my_selections) {
+    make_time_course_standata(
+      selection = selection,      # minimum number of data points per participants
+      max_diff_load_12perday = 5, # maximum allowed per day viral load increases
+      imputation_limit = 3) %>%   # maximum value of imputed viral load for negative tests
+      list2env(.GlobalEnv)
   
-  sm = cmdstan_model(here(paste0("CP/stan/",model,".stan")))
+    sm = cmdstan_model(here(paste0("CP/stan/",model,".stan")))
   
-  csf = sm$sample(
-    data = datalist,
-    iter_warmup = 1000,
-    iter_sampling = 1000,
-    adapt_delta = .8,
-    max_treedepth = 10,
-    init = lapply(1:4, function(x) make_TC_inits(datalist)),
-    seed = 123)
+    csf = sm$sample(
+      data = datalist,
+      iter_warmup = 1000,
+      iter_sampling = 1000,
+      adapt_delta = .8,
+      max_treedepth = 10,
+      init = lapply(1:4, function(x) make_TC_inits(datalist)),
+      seed = 123)
   
-  draws = csf$draws()
+    draws = csf$draws()
   
-  ss = 
-    draws %>% 
-    summarise_draws() %>% 
-    data.table() 
-  sampler_diags = 
-    csf$sampler_diagnostics() %>% 
-    as_draws_df() %>% 
-    data.table()
-  inits = csf$init()
-  basic_filename = 
-    here(
-      paste0("CP/fits/w25o/",
-             model,
-             "_sel",selection))
-  save(csf, ss, day_data, datalist, sampler_diags, inits,
-       file = paste0(basic_filename,".Rdata"))
+    ss =
+      draws %>%
+      summarise_draws() %>%
+      data.table()
+    sampler_diags =
+      csf$sampler_diagnostics() %>%
+      as_draws_df() %>%
+      data.table()
+    inits = csf$init()
+    basic_filename =
+      here(
+        paste0("CP/fits/w25o/",
+               model,
+               "_sel",selection))
+    save(csf, ss, day_data, datalist, sampler_diags, inits,
+         file = paste0(basic_filename,".Rdata"))
+  }
 }
 ```
 
@@ -1650,7 +1658,7 @@ To check that the model adequately describes the data, we plot observed data tog
 ```{r ppcTimeModel, fig.height=9, fig.width=9, fig.cap = "Posterior predictive check for the estimated 2-slopes time course. Blue lines are expected viral load time courses, i.e., the average over all time courses calulated from the posterior distribution of a subject's parameters. The shaded blue region indicates the 90% credible interval of the expection. x are observed measurements. Red points are observed measurements after shifting them for alignment in time and imputation of viral loads for negative tests."}
 
 if (file.exists("pdata/VLCP_by_day_draws.Rdata")) {
-  load("pdata/VLCP_by_day_draws_b.Rdata")
+  load("pdata/VLCP_by_day_draws.Rdata")
 } else {
   VLCP_by_day_draws = 
     make_VLCP_by_draw_ID(draws,
@@ -1763,7 +1771,7 @@ ppc_timecourse
 ggsave(ppc_timecourse,
        file = "figures/S16_ppc_timecourse.png",
        width = 30, height = 40,units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(ppc_timecourse,
        file = "figures/S16_ppc_timecourse.pdf",
        width = 30, height = 40,units = "cm")
@@ -1807,11 +1815,11 @@ ppc_timecourse =
 ggsave(ppc_timecourse,
        file = "figures/S17_ppc_difficult.png",
        width = 30, height = 30,units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(ppc_timecourse,
        file = "figures/S17_ppc_difficult.png",
        width = 30, height = 30,units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ppc_timecourse
 
 ```
@@ -2123,7 +2131,7 @@ all_weights_Age_TestCentre =
 
 all_weights_Age_TestCentre %>% 
   copy() %>% 
-  .[N == 0, weight := NA] %>% 
+  .[N > 0] %>%
   ggplot(aes(y = TestCentre.Group, x = weight, group = Age, color = Age)) + 
   geom_point() + 
   theme(legend.position= "top")
@@ -2349,8 +2357,6 @@ global_CP =
   post_lin_pred %>% 
   .[global_weights, w_CP := CP * w_age] %>%
   .[, .(CP = sum(w_CP)), by = .(.draw,Group)]
-
-post_lin_pred[, w_CP := NULL]
 ```
 
 
@@ -2388,7 +2394,7 @@ p_load_by_age =
   coord_cartesian(ylim = c(2,10)) +
   scale_x_continuous(expand = expansion(0,0)) +
   ylab(expression(Mean~log[10]~viral~load)) +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_load_by_age
 p_load_by_age = 
@@ -2397,7 +2403,7 @@ p_load_by_age =
   gg_legend_size(1) +
   gg_expand() + 
   gg_text_size() +
-  guides(color = FALSE) 
+  guides(color = "none")
 ```
 
 Because we are primarily interested in differences between sub _groups_ of the population, we calculate credible intervals based on the expected viral load (and culture probability). This could however give a false impression about the accuracy of viral load predictions on the subject-level, which should take the error variance into account. 
@@ -2419,7 +2425,7 @@ p_CP_by_age =
   coord_cartesian(ylim = c(0,1)) +
   scale_x_continuous(expand = expansion(0,0)) +
   ylab("Culture probability") +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_CP_by_age.e =
   ggplot(stats_by_age.e[outcome == "e.CP" & sample != "All"],
@@ -2432,7 +2438,7 @@ p_CP_by_age.e =
   coord_cartesian(ylim = c(0,1)) +
   scale_x_continuous(expand = expansion(0,0)) +
   ylab("Culture probability") +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_CP_by_age = 
   p_CP_by_age + 
@@ -2440,7 +2446,7 @@ p_CP_by_age =
   gg_legend_size(1) +
   gg_expand() + 
   gg_text_size() +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_CP_by_age.e = 
   p_CP_by_age.e + 
@@ -2448,7 +2454,7 @@ p_CP_by_age.e =
   gg_legend_size(1) +
   gg_expand() + 
   gg_text_size() +
-  guides(color = FALSE) 
+  guides(color = "none")
 
 p_CP_by_age.e + p_CP_by_age + facet_grid(sample~.) + theme(legend.position = "none")
 ```
@@ -2868,7 +2874,6 @@ p_age_comp_CP =
 
 
 p_age_comp_VL
-rm(post_lin_pred_all)
 ```
 
 To collect all age comparisons in one place and thus facilitate comparisons, we compose a table with estimated age differences for viral load and culture probability and unadjusted age differences calculated directly from the raw data. This is table 2 of the paper.
@@ -3277,8 +3282,7 @@ ggsave(paramplot,
        width = 30,
        units = "cm",
        dpi = 300,
-       type = "cairo",
-       device = png_device)
+       type = "cairo")
 ggsave(paramplot,
        file = "figures/S5_TC_model_params_posterior_distribution.pdf",
        height = 15,
@@ -3481,8 +3485,7 @@ rm(model_pars_by_sub_sample)
        width = 30,
        height = 20,
        units = "cm",
-       type = "cairo",
-       device = png_device)
+       type = "cairo")
 ggsave(file = "figures/S11_TC_model_params_by_subsample_group.pdf",
        width = 30,
        height = 20,
@@ -3535,7 +3538,7 @@ tmp =
   as_draws_dt() %>% 
   melt(id.var = ".draw", value.name = "int_centre1_raw") %>% 
   .[, centr1 := factor(as.numeric(factor(variable)),
-                          labels = names(table(day_data[day == 0,centreCategory])))] %>% 
+                          labels = names(table(day_data[day == 0,testCentreCategory])))] %>%
   merge(draws %>%
           subset_draws("int_centre1_sigma") %>%
           as_draws_dt(), by = ".draw") %>% 
@@ -3851,8 +3854,7 @@ if (file.exists("pdata/DetectionTiming.Rdata")) {
   shift_ttp = 
     draws_by_id(draws,c("shift","slope_up","intercept","time2peak"))
   setkeyv(day_data,"ID")
-  setkeyv(positive_before_peak_load_by_ID_draw,"ID")
-  positive_before_peak_load_by_ID_draw = 
+  positive_before_peak_load_by_ID_draw =
   merge(shift_ttp,
         day_data[day == 0,
                  .(ID,first_test_negative,day_first_positive,N_tests,Age,PAMS1,Group)],
@@ -3865,6 +3867,7 @@ if (file.exists("pdata/DetectionTiming.Rdata")) {
   .[, p_pos_test_before_peak := ((day_first_positive + shift) < 0) ] %>%
   .[, pos_test_before_peak := day_first_positive_shifted < 0] %>%
   .[, pos_test_before_peak_b := ifelse(p_pos_test_before_peak > runif(1),T,F), by = .(ID,.draw)]
+  setkeyv(positive_before_peak_load_by_ID_draw,"ID")
   
 day_first_post_test_by_draw = 
   positive_before_peak_load_by_ID_draw %>%
@@ -4364,7 +4367,7 @@ if (file.exists("pdata/TC_by_age_grp2.Rdata")) {
 } else {
   TC_by_age_grp2 = 
   plot_by_day_grp_delta(VLCP_by_day_draws,
-                      grp.dt = unique(day_data[,.(ID,Age_group)]),
+                      grp.dt = unique(day_data[!is.na(Age_group),.(ID,Age_group)]),
                       comparisons = my_comparisons)
   TC_by_age_grp2_peak_VLCB_tbl = 
   merge(
@@ -4552,7 +4555,7 @@ p_Group_Age1 =
   theme(axis.title.x = element_blank())
 
 p_Age_Group2 = 
-  by_day_grp %>% 
+  by_day_grp[!is.na(Age)] %>%
   ggplot(aes(x = day_shifted, y = mean, color = Age)) + 
   geom_line() + 
   conf_ribbon(by_day_grp, fill = "Age") + 
@@ -4656,7 +4659,8 @@ if (file.exists("pdata/peak_load_by_age_draws.Rdata")) {
   CPpars = draws %>% 
     subset_draws(c("alpha_CP","beta_CP")) %>% 
     as_draws_dt() %>% 
-    setkeyv(".draw") 
+    setkeyv(".draw")
+  est_TC_PHG_by_Age()
   peak_load_by_age_draws_full = 
     do.call(rbind,
             lapply(c(T,F), 
@@ -4693,19 +4697,19 @@ if (file.exists("pdata/peak_load_by_age_draws.Rdata")) {
 
 
 
-comp = peak_load_by_age_draws[Age > 44 & Age < 55 , .(m = mean(VL)), by = .(adjusted,.draw)]
-setkeyv(comp,c(".draw","adjusted"))
-setkeyv(peak_load_by_age_draws,c(".draw","adjusted"))
+comp = peak_load_by_age_draws[Age > 44 & Age < 55 , .(m = mean(VL)), by = .(Adjusted,.draw)]
+setkeyv(comp,c(".draw","Adjusted"))
+setkeyv(peak_load_by_age_draws,c(".draw","Adjusted"))
 pdata = 
   peak_load_by_age_draws %>% 
   .[comp, delta := VL - m] %>% 
-  get_stats(var = "delta",by = c("Age","adjusted")) %>% 
-  .[,Adjustment := ifelse(adjusted == T,"Yes","No")]
+  get_stats(var = "delta",by = c("Age","Adjusted")) %>%
+  .[,Adjustment := ifelse(Adjusted == T,"Yes","No")]
 delta_grand_mean = 
-  peak_load_by_age_draws[,.(m = mean(VL)), by = .(adjusted)] %>% 
-  merge(comp[,.(m = mean(m)), by = .(adjusted)], by = "adjusted") %>% 
+  peak_load_by_age_draws[,.(m = mean(VL)), by = .(Adjusted)] %>%
+  merge(comp[,.(m = mean(m)), by = .(Adjusted)], by = "Adjusted") %>%
   .[, delta := m.x - m.y] %>% 
-  .[,Adjustment := ifelse(adjusted == T,"Yes","No")]
+  .[,Adjustment := ifelse(Adjusted == T,"Yes","No")]
 p_deltaVL_peak = 
   pdata %>% 
   ggplot(aes(x = Age, y = mean, color = Adjustment, fill = Adjustment, group = Adjustment)) +
@@ -4722,18 +4726,18 @@ p_deltaVL_peak =
   gg_expand() + 
   gg_add_grid()
 
-comp = peak_load_by_age_draws[Age > 44 & Age < 55 , .(m = mean(CP)), by = .(adjusted,.draw)]
-setkeyv(comp,c(".draw","adjusted"))
+comp = peak_load_by_age_draws[Age > 44 & Age < 55 , .(m = mean(CP)), by = .(Adjusted,.draw)]
+setkeyv(comp,c(".draw","Adjusted"))
 pdata = 
   peak_load_by_age_draws %>% 
   .[comp, delta := CP - m] %>% 
-  get_stats(var = "delta",by = c("Age","adjusted")) %>% 
-  .[,Adjustment := ifelse(adjusted == T,"Yes","No")]
+  get_stats(var = "delta",by = c("Age","Adjusted")) %>%
+  .[,Adjustment := ifelse(Adjusted == T,"Yes","No")]
 delta_grand_mean = 
-  peak_load_by_age_draws[,.(m = mean(CP)), by = .(adjusted)] %>% 
-  merge(comp[,.(m = mean(m)), by = .(adjusted)], by = "adjusted") %>% 
+  peak_load_by_age_draws[,.(m = mean(CP)), by = .(Adjusted)] %>%
+  merge(comp[,.(m = mean(m)), by = .(Adjusted)], by = "Adjusted") %>%
   .[, delta := m.x - m.y] %>% 
-  .[,Adjustment := ifelse(adjusted == T,"Yes","No")]
+  .[,Adjustment := ifelse(Adjusted == T,"Yes","No")]
 p_deltaCP_peak = 
   pdata %>% 
   ggplot(aes(x = Age, y = mean, color = Adjustment, fill = Adjustment, group = Adjustment)) +
@@ -4756,7 +4760,7 @@ p_deltaVL_peak | p_deltaCP_peak
 
 ```{r TBLpeakVLCPdiff}
 comps = setdiff(levels(peak_load_by_age_group_draws$Age_group),"45-55")
-setkeyv(peak_load_by_age_group_draws, c(".draw","adjusted","Age_group"))
+setkeyv(peak_load_by_age_group_draws, c(".draw","Adjusted","Age_group"))
 
 peak_VLCP_diffs_tbl = 
   do.call(rbind,
@@ -4766,13 +4770,13 @@ peak_VLCP_diffs_tbl =
                  .[Age_group %in% c("45-55",comp)] %>% 
                  .[, .(deltaCP = diff(CP)*ifelse(comp %in% comps[1:5],-1,1), 
                        deltaVL = diff(VL)*ifelse(comp %in% comps[1:5],-1,1)), 
-                   by = .(adjusted,.draw)] %>% 
-                 .[, .(VL = sprint_stat(deltaVL),CP = sprint_stat(deltaCP,2)), by = .(adjusted)] %>% 
+                   by = .(Adjusted,.draw)] %>%
+                 .[, .(VL = sprint_stat(deltaVL),CP = sprint_stat(deltaCP,2)), by = .(Adjusted)] %>%
                  .[, `Age group` := comp])
 ) %>% 
-  .[, .(`Age group`,adjusted,VL,CP)] %>% 
+  .[, .(`Age group`,Adjusted,VL,CP)] %>%
   .[, `Age group` := factor(`Age group`,levels = levels(peak_load_by_age_group_draws$Age_group))] %>% 
-  setkeyv(c("adjusted","Age group"))
+  setkeyv(c("Adjusted","Age group"))
 
 
 tbl_peak_VLCP_diffs_tbl = 
@@ -5055,7 +5059,7 @@ F2 =
 
 ggsave(F2,filename = "figures/F2.png",
        width = 30, height = 24, units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(F2,filename = "figures/F2.pdf",
        width = 30, height = 24, units = "cm")
 #save(F2,file = "figures/F2.Rdata")
@@ -5172,7 +5176,7 @@ F4 =
 
 ggsave(F4,filename = "figures/F4.png",
        width = 30, height = 10, units = "cm", dpi = 300,
-       device = png_device)
+       type = "cairo")
 ggsave(F4,filename = "figures/F4.pdf",
        width = 30, height = 10, units = "cm")
 F4
@@ -5184,7 +5188,6 @@ tmp = gc(verbose = F)
 ## Figure 5: Peak viral load and culture probability by age
 
 ```{r makeFigure5, fig.cap="Estimated expected viral load and culture probability for age groups by time. A) Change in estimated viral load over time according to age group for 4344 subjects with at least three RT-PCR tests, at least two of which were positive. The age colouring, range, and number of subjects in each category is given in the figure legend. Shading indicates the 90% credible interval of the mean. B) Change in estimated culture probability over time according to age. Age groups, colouring, and shading are as in A. C) Estimated age group differences in mean peak viral load, corresponding to the values at day zero in A. D) Estimated age group differences in mean peak culture probability, corresponding to the values at day zero in B. In C and D, adjusted differences account for variations by age in clinical status and gender. Dotted lines indicate grand means for the 4344 subjects.", fig.width=20/2.54, fig.height=20/2.54}
-VLCP_by_day_draws[, Age_group := NULL]
 grp.dt = unique(day_data[,.(ID,Age_group)])
 
 VL_TC = 
@@ -5214,15 +5217,17 @@ ggsave("figures/F5.pdf",F5, width = 20,
        height = 20, units = "cm")
 #save(F5,file = "figures/F5.Rdata")
 F5 
-rm(F5 ,VL_TC, CP_TC,VL_delta, CP_delta)
+rm(F5 ,VL_TC, CP_TC)
 ```
 
 `r ifelse(show_code == T,"# Stan model for time course estimation","")`
 
 ```{r show_group_model, echo=FALSE, results="asis"}
-if (show_code == T) {
+## check pygmentize exists (assumed in "anaconda" dir)
+pygmentize_bin = paste0(Sys.getenv("HOME"), "/anaconda/bin/pygmentize")
+if (show_code == T && file.exists(pygmentize_bin)) {
   tf <- tempfile(fileext=".html")
-  cmd = paste0("/Users/guidobiele/anaconda/bin/pygmentize -o %s CP/stan/",model,".stan")
+  cmd = paste0(pygmentize_bin, " -o %s CP/stan/",model,".stan")
   system(sprintf(cmd, tf))
   cat(readLines(tf), sep="\n")
   unlink(tf)
@@ -5236,7 +5241,7 @@ if (show_code == T) {
 library(pander)
 library(sessioninfo)
 my_sessioninfo <- session_info()
-pander(my_sessioninfo)
+suppressWarnings(pander(my_sessioninfo))
 ```
 
 # References
